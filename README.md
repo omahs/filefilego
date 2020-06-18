@@ -6,6 +6,127 @@ We have seen the rise of the Internet from the first days until now. Open intern
 
 These days it's extremely difficult for sites like WikiLeaks, thepiratebay, and so on to operate without interruption and pressure from different oppressing parties. With these in mind, we have developed the FileFileGo protocol and stacks to allow users access and share data without a single point of failure.
 
+# Installation
+
+### Linux, macOS, and FreeBSD based systems
+
+#### Install requirements
+
+1. Download and install golang
+
+```
+https://golang.org/doc/install
+follow the instructions to install golang on your system
+```
+
+#### Compile FileFileGo for Linux, macOS, and FreeBSD
+
+1. Download and Compile:
+
+```
+git clone https://gitlab.com/filefilego/filefilego.git
+cd filefilego/cli
+go build -o filefilego .
+```
+
+2. Create Node Identity Key (Used for encryption and network identification)
+   Replace **thisismynodespassword** with your own password
+
+```
+./filefilego account create_node_key thisismynodespassword
+```
+
+3. Create keystore files which contain address and the private key:
+   Replace **thisismypassword** with your own password
+
+```
+./filefilego account create thisismypassword
+```
+
+4. List the created accounts:
+
+```
+./filefilego account list
+
+You will get json filenames which contains the address of your created account in step 3.
+0x--------------------------------.json
+```
+
+5. Run the full node:
+
+```
+./filefilego --rpc --http --httpport=8090 --httpaddr=0.0.0.0 --bootstrapnodes="/ip4/77.247.178.110/tcp/10209/p2p/16Uiu2HAm1WKH57E4vku2rhLT3qMtP6GX5t5CxxoSmQnJWMHc6Lot"
+```
+
+The above command runs a full node and starts the http rpc server. In this case we listen on all interfaces `0.0.0.0` and port `8090` so we can build application which can interact with this full node.
+
+### Windows
+
+#### Install requirements for Windows
+
+1. Install Go for windows
+
+```
+https://golang.org/dl/
+
+Download: go1.14.4.windows-amd64.msi
+and install the package
+```
+
+2. Install TDM-GCC
+   In order to compile the code on windows we need gcc.
+   Download the TDM-GCC installer by visiting this page:
+
+```
+https://jmeubank.github.io/tdm-gcc/
+
+Download tdm64-gcc-x.x.x.exe if you are on a 64-bit machine
+-- or ---
+Download tdm-gcc-9.2.0.exe if you are on a 32-bit machine
+
+Most of modern CPUs are 64-bit based so go for the first binary
+```
+
+#### Compile FileFileGo for Windows
+
+1. Download and Compile:
+   Open a windows cmd/terminal and follow the instructions(use `dir` to navigate to your desired folder e.g. `C:/FileFileGo`):
+
+```
+git clone https://gitlab.com/filefilego/filefilego.git
+cd filefilego/cli
+go build -o filefilego.exe .
+```
+
+2. Create Node Identity Key (Used for encryption and network identification)
+   Replace **thisismynodespassword** with your own password
+
+```
+filefilego.exe account create_node_key thisismynodespassword
+```
+
+3. Create keystore files which contain address and the private key:
+   Replace **thisismypassword** with your own password
+
+```
+filefilego.exe account create thisismypassword
+```
+
+4. List the created accounts:
+
+```
+filefilego.exe account list
+
+You will get json filenames which contains the address of your created account in step 3.
+0x--------------------------------.json
+```
+
+5. Run the full node:
+
+```
+filefilego.exe --rpc --http --httpport=8090 --httpaddr=0.0.0.0 --bootstrapnodes="/ip4/77.247.178.110/tcp/10209/p2p/16Uiu2HAm1WKH57E4vku2rhLT3qMtP6GX5t5CxxoSmQnJWMHc6Lot"
+```
+
 # Architecture
 
 In this section we cover the disadvantages of different protocols and platforms to get a more clear picture and examine the weaknesses.
