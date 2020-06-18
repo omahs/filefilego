@@ -1,0 +1,65 @@
+syntax="proto3";
+
+package node;
+
+
+
+// type Block struct {
+// 	Timestamp     int64
+// 	Data          []byte
+// 	PrevBlockHash []byte
+	
+// 	Hash         []byte
+// 	Signature    []byte
+// 	Transactions []Transaction
+// }
+
+
+
+message Block {
+    int64 Timestamp = 1;
+    bytes Data = 2;
+    bytes PrevBlockHash = 3;
+    bytes Hash = 4;
+    bytes Signature = 5;
+    repeated Transaction Transactions = 6;
+}
+
+message Transaction {
+    bytes Hash = 1;
+    string PubKey = 2;
+    string Nounce = 3;
+    bytes Data = 4;
+    string From = 5;
+    string To = 6;
+    string Value = 7;
+    string TransactionFees = 8;
+    bytes Signature = 9;
+}
+
+message GossipPayload {
+    enum GossipPayloadType {
+        BLOCK = 0;
+        TRANSACTION = 1;
+    }
+    GossipPayloadType Type = 1;
+    bytes Payload = 2;
+}
+
+enum BlockQueryType {
+    HEIGHT = 0;
+    BLOCK = 1;
+}
+
+message BlockQuery {
+    BlockQueryType Type = 1;
+    uint64 BlockNo = 2;
+}
+
+message BlockQueryResponse {
+    uint64 Height = 1;
+    bytes Payload = 2;
+    bool Error = 3;
+    BlockQueryType Type = 4;
+    uint64 NodeHeight = 5;
+}
