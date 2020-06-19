@@ -36,7 +36,7 @@ go build -o filefilego .
 ./filefilego account create_node_key thisismynodespassword
 ```
 
-3. Create keystore files which contain address and the private key:
+3. Create an account to send/receive coins.
    Replace **thisismypassword** with your own password
 
 ```
@@ -74,8 +74,8 @@ and install the package
 ```
 
 2. Install TDM-GCC
-   In order to compile the code on windows we need gcc.
-   Download the TDM-GCC installer by visiting this page:
+
+In order to compile the code on windows we need gcc. Download the TDM-GCC installer by visiting this page:
 
 ```
 https://jmeubank.github.io/tdm-gcc/
@@ -105,7 +105,7 @@ go build -o filefilego.exe .
 filefilego.exe account create_node_key thisismynodespassword
 ```
 
-3. Create keystore files which contain address and the private key:
+3. Create an account to send/receive coins.
    Replace **thisismypassword** with your own password
 
 ```
@@ -217,7 +217,10 @@ In this section we will introduce technical terms and concepts used in FileFileG
 
 ### Channels
 
-Channels allow users to organize and group data. Its similar to a bucket or folder. For example userX who owns a youtube channel wants to share the videos
+Channels allow users to organize and group data. Its similar to a bucket or folder. For example all the content on Wikileaks can be placed within a channel called "Wikileaks".
+The channel creator inherits all the permissions required for updates and other channel related functionalities.
+
+###
 
 # Crypto-Economics Specification
 

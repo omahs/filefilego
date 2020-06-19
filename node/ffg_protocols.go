@@ -15,6 +15,10 @@ import (
 	"gitlab.com/younixcc/filefilego/common/hexutil"
 )
 
+var (
+	BlockRequiredGlobalMutex = sync.Mutex{}
+)
+
 type BlockService struct {
 	Node              *Node
 	RemoteHosts       []*RemoteHost
@@ -329,6 +333,15 @@ func (rm *RemoteHost) Read() {
 				BlockQueryResponse: bqr,
 				PeerID:             rm.PeerID,
 			}
+
+			if pl.BlockQueryResponse.Type == BlockQueryType_HEIGHT {
+				BlockRequiredGlobalMutex.Lock()
+				for i := rm.BlockService.Node.BlockChain.GetHeight() + 1; i <= pl.BlockQueryResponse.NodeHeight; i++ {
+					rm.BlockService.Node.BlockService.AddRequiredBlock(i)
+				}
+				BlockRequiredGlobalMutex.Unlock()
+			}
+
 			rm.AddHeight(pl.BlockQueryResponse.NodeHeight)
 
 			if pl.BlockQueryResponse.NodeHeight > rm.BlockService.GetHeighestBlock() {
@@ -337,21 +350,19 @@ func (rm *RemoteHost) Read() {
 
 			if pl.BlockQueryResponse.NodeHeight <= rm.BlockService.Node.BlockChain.GetHeight() {
 				rm.BlockService.Node.BlockService.RemoveFromRemoteHosts(pl.PeerID)
-
 				continue
 			}
 
 			if len(pl.BlockQueryResponse.Payload) > 0 {
-
 				block, _ := DeserializeBlock(pl.BlockQueryResponse.Payload)
 				log.Println("Downloaded Block:\t", hexutil.Encode(block.Hash), " From Peer:\t", pl.PeerID, " Height:\t", pl.BlockQueryResponse.Height)
 
 				err := rm.BlockService.Node.BlockChain.AddBlockPool(block)
 				if err != nil {
-					log.Warn("error while adding downloaded block to the pool ", err)
-					rm.BlockService.Node.BlockChain.ClearBlockPool()
-					rm.BlockService.Node.SetSyncing(false)
-					rm.BlockService.Node.Sync(context.Background())
+					log.Warn(err)
+					// rm.BlockService.Node.BlockChain.ClearBlockPool()
+					// rm.BlockService.Node.SetSyncing(false)
+					// rm.BlockService.Node.Sync(context.Background())
 				}
 
 			}
@@ -366,7 +377,9 @@ func (rm *RemoteHost) Read() {
 
 // SendJob
 func (rm *RemoteHost) SendJob() {
-
+	// rand.Seed(time.Now().UnixNano())
+	// r := rand.Intn(2000)
+	// time.Sleep(time.Duration(r) * time.Millisecond)
 	hb := rm.BlockService.Node.BlockService.GetHeighestBlock()
 	nodesHeight := rm.BlockService.Node.BlockChain.GetHeight()
 
@@ -376,9 +389,9 @@ func (rm *RemoteHost) SendJob() {
 		return
 	}
 
-	for i := nodesHeight + 1; i <= hb; i++ {
-		rm.BlockService.Node.BlockService.AddRequiredBlock(i)
-	}
+	// for i := nodesHeight + 1; i <= hb; i++ {
+	// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
+	// }
 
 	job, ok := rm.BlockService.PopNextRequiredBlock()
 
