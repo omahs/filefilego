@@ -148,7 +148,7 @@ func (bs *BlockService) BlockHandler(s network.Stream) {
 		n, err := s.Read(chunk)
 
 		if err != nil {
-			log.Warn("error while reading from stream: ", err)
+			log.Warn("stream closed from remote peer: ", err)
 			return
 		}
 
@@ -275,7 +275,7 @@ func (rm *RemoteHost) Query(blockNo uint64) {
 
 	_, err = rm.Stream.Write(msg)
 	if err != nil {
-		log.Warn("error while writing to stream: ", err)
+		// log.Warn("error while writing to stream: ", err)
 	}
 
 }
@@ -289,7 +289,7 @@ func (rm *RemoteHost) Read() {
 		n, err := rm.Stream.Read(chunk)
 
 		if err != nil {
-			log.Warn("error while reading from stream: ", err)
+			// log.Warn("stream closed from remote peer: ", err)
 			return
 		}
 
@@ -383,6 +383,7 @@ func (rm *RemoteHost) SendJob() {
 	hb := rm.BlockService.Node.BlockService.GetHeighestBlock()
 	nodesHeight := rm.BlockService.Node.BlockChain.GetHeight()
 
+	// log.Println("hb: ", hb, " nodesheight: ", nodesHeight)
 	if hb > 0 && nodesHeight >= hb {
 		log.Println("All blocks downloaded")
 		rm.BlockService.Node.SetSyncing(false)
@@ -395,15 +396,20 @@ func (rm *RemoteHost) SendJob() {
 
 	job, ok := rm.BlockService.PopNextRequiredBlock()
 
-	if !ok {
-		for {
-			job, ok = rm.BlockService.PopNextRequiredBlock()
-			if ok {
-				break
-			}
-			// time.Sleep(1 * time.Second)
-		}
-	}
+	// if !ok {
+	// 	tryGetNext := 0
+	// 	for {
+	// 		job, ok = rm.BlockService.PopNextRequiredBlock()
+	// 		if ok {
+	// 			break
+	// 		}
+	// 		time.Sleep(1 * time.Second)
+	// 		if tryGetNext > 2 {
+	// 			break
+	// 		}
+	// 		tryGetNext++
+	// 	}
+	// }
 
 	if ok {
 		if job > rm.GetHeight() {
@@ -416,6 +422,17 @@ func (rm *RemoteHost) SendJob() {
 		}
 		log.Println("Client Node: ", nodesHeight, " NetworkHeight: ", hb, " Sendjob height: ", job)
 		rm.Query(job)
+	} else {
+		// at this point PopNextRequiredBlock is empty
+		// resync
+		// log.Println("EMPTY PopNextRequiredBlock")
+		// for i := nodesHeight + 1; i <= hb; i++ {
+		// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
+		// }
+
+		rm.BlockService.Node.BlockChain.ClearBlockPool()
+		rm.BlockService.Node.SetSyncing(false)
+		// rm.BlockService.Node.Sync(context.Background())
 	}
 
 }
