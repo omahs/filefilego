@@ -1,6 +1,6 @@
 FROM ubuntu:16.04
 
-COPY cli/cli cli
+COPY cli/filefilego filefilego
 
 # ENTRYPOINT ["/cli"]
 
