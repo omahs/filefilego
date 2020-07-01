@@ -2,7 +2,6 @@ package node
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
@@ -115,6 +114,38 @@ func (bc *Blockchain) GetBlockByHeight(number uint64) (bb Block, err error) {
 		}
 	}
 	return bb, errors.New("block was not found")
+}
+
+// GetBlocksByRange gets a range of blocks
+func (bc *Blockchain) GetBlocksByRange(from uint64, to uint64) ([]*Block, error) {
+	if from < 0 {
+		return nil, errors.New("invalid from")
+	}
+	height := bc.GetHeight()
+	if to > height {
+		return nil, errors.New("range \"to\" is greater than blockchain height")
+	}
+	bci := bc.Iterator()
+	bb := []Block{}
+	for {
+		block := bci.Next()
+		if height <= to && height >= from {
+			bb = append(bb, block)
+
+		}
+		height--
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+
+	reversed := []*Block{}
+	for i := range bb {
+		n := bb[len(bb)-1-i]
+		reversed = append(reversed, &n)
+	}
+
+	return reversed, nil
 }
 
 // GetBlockByHash gets the block given its hash
@@ -512,10 +543,10 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 
 	// if blockPool len > 0, some blocks are missing so trigger a sync here
 	// if len(bc.BlockPool) > 0 && !bc.Node.IsSyncing() {
-	if len(bc.BlockPool) > 0 {
-		bc.Node.BlockService.Node.SetSyncing(false)
-		bc.Node.Sync(context.Background())
-	}
+	// if len(bc.BlockPool) > 0 {
+	// 	bc.Node.BlockService.Node.SetSyncing(false)
+	// 	bc.Node.Sync(context.Background())
+	// }
 
 	return nil
 }

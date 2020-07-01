@@ -286,9 +286,10 @@ func (n *Node) Sync(ctx context.Context) error {
 
 	// n.SetSyncing(true)
 	// produce blocks
+	currentHeight := n.BlockChain.GetHeight()
 	for _, p := range n.Peers() {
 		if n.Host.ID() != p {
-			go NewRemoteHost(ctx, n.BlockService, p)
+			go NewRemoteHost(ctx, n.BlockService, p, currentHeight)
 		}
 	}
 	return nil
