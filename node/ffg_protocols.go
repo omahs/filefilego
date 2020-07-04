@@ -19,7 +19,7 @@ var (
 	// BlockRequiredGlobalMutex = sync.Mutex{}
 
 	// BlockRangeMax used as "to" for block ranges
-	BlockRangeMax uint64 = 2
+	BlockRangeMax uint64 = 10000
 )
 
 type RequiredBlock struct {
@@ -367,6 +367,7 @@ func (rm *RemoteHost) Read() {
 
 		if err != nil {
 			// log.Warn("stream closed from remote peer: ", err)
+			// rm.Close()
 			return
 		}
 
@@ -462,7 +463,7 @@ func (rm *RemoteHost) SendJob() {
 	hb := rm.BlockService.Node.BlockService.GetHeighestBlock()
 	nodesHeight := rm.BlockService.Node.BlockChain.GetHeight()
 
-	// log.Println("hb: ", hb, " nodesheight: ", nodesHeight)
+	log.Println("Sendjob:\tHeighest block: ", hb, " Nodes height: ", nodesHeight)
 	if hb > 0 && nodesHeight >= hb {
 		log.Println("All blocks downloaded")
 		rm.BlockService.Node.SetSyncing(false)
@@ -486,14 +487,14 @@ func (rm *RemoteHost) SendJob() {
 	} else {
 		// at this point PopNextRequiredBlock is empty
 		// resync
-		// log.Println("EMPTY PopNextRequiredBlock")
+		log.Println("EMPTY PopNextRequiredBlock")
 		// for i := nodesHeight + 1; i <= hb; i++ {
 		// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
 		// }
 
-		rm.BlockService.Node.BlockChain.ClearBlockPool()
+		// rm.BlockService.Node.BlockChain.ClearBlockPool()
 		rm.BlockService.Node.SetSyncing(false)
-		// rm.BlockService.Node.Sync(context.Background())
+		rm.BlockService.Node.Sync(context.Background())
 	}
 
 }

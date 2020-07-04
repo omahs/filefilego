@@ -464,16 +464,16 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	}
 
 	// chceck if the block is within the db already
-	blockAlreadyInDb := false
-	bc.TraverseChain(func(blc Block) {
-		if reflect.DeepEqual(blc.Hash, block.Hash) {
-			blockAlreadyInDb = true
-		}
-	})
+	// blockAlreadyInDb := false
+	// bc.TraverseChain(func(blc Block) {
+	// 	if reflect.DeepEqual(blc.Hash, block.Hash) {
+	// 		blockAlreadyInDb = true
+	// 	}
+	// })
 
-	if blockAlreadyInDb {
-		return errors.New("a block with the same hash is already in the db")
-	}
+	// if blockAlreadyInDb {
+	// 	return errors.New("a block with the same hash is already in the db")
+	// }
 
 	bc.BlockPool = append(bc.BlockPool, block)
 
