@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
@@ -542,7 +543,11 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	}
 
 	// if blockPool len > 0, some blocks are missing so trigger a sync here
-	// if len(bc.BlockPool) > 0 && !bc.Node.IsSyncing() {
+	if len(bc.BlockPool) > 0 && !bc.Node.IsSyncing() {
+		bc.Node.BlockService.Node.SetSyncing(false)
+		bc.Node.Sync(context.Background())
+
+	}
 	// if len(bc.BlockPool) > 0 {
 	// 	bc.Node.BlockService.Node.SetSyncing(false)
 	// 	bc.Node.Sync(context.Background())

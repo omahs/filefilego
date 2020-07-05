@@ -224,7 +224,7 @@ func (bs *BlockService) BlockHandler(s network.Stream) {
 		n, err := s.Read(chunk)
 
 		if err != nil {
-			log.Warn("stream closed from remote peer: ", err)
+			// log.Warn("Stream closed by remote peer: ", err)
 			return
 		}
 
@@ -433,14 +433,15 @@ func (rm *RemoteHost) Read() {
 
 			if len(pl.BlockQueryResponse.Payload) > 0 {
 				for _, block := range pl.BlockQueryResponse.Payload {
-					log.Println("Downloaded Block:\t", hexutil.Encode(block.Hash), " From Peer:\t", pl.PeerID, " Range:\t", pl.BlockQueryResponse.From, pl.BlockQueryResponse.To)
+					log.Println("Downloaded Block:\t", hexutil.Encode(block.Hash), " From Peer:\t", pl.PeerID)
 
 					err := rm.BlockService.Node.BlockChain.AddBlockPool(*block)
 					if err != nil {
-						log.Warn(err)
-						// rm.BlockService.Node.BlockChain.ClearBlockPool()
-						// rm.BlockService.Node.SetSyncing(false)
-						// rm.BlockService.Node.Sync(context.Background())
+
+						// log.Warn(err)
+						rm.BlockService.Node.BlockChain.ClearBlockPool()
+						rm.BlockService.Node.SetSyncing(false)
+						rm.BlockService.Node.Sync(context.Background())
 					}
 				}
 				// block, _ := DeserializeBlock(pl.BlockQueryResponse.Payload)
