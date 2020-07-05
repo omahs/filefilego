@@ -87,6 +87,18 @@ Download tdm-gcc-9.2.0.exe if you are on a 32-bit machine
 Most of modern CPUs are 64-bit based so go for the first binary
 ```
 
+3. Install Git on Windows
+
+```
+https://git-scm.com/download/win
+
+Download:
+
+64-bit Git for Windows Setup
+-- or --
+32-bit Git for Windows Setup
+```
+
 #### Compile FileFileGo for Windows
 
 1. Download and Compile:
