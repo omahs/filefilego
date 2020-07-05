@@ -16,26 +16,35 @@ import (
 )
 
 var (
-	BlockRequiredGlobalMutex = sync.Mutex{}
+	// BlockRequiredGlobalMutex = sync.Mutex{}
+
+	// BlockRangeMax used as "to" for block ranges
+	BlockRangeMax uint64 = 10000
 )
 
+type RequiredBlock struct {
+	from uint64
+	to   uint64
+}
 type BlockService struct {
-	Node              *Node
-	RemoteHosts       []*RemoteHost
-	RemoteHostsMux    *sync.Mutex
-	HeighestBlock     uint64
-	HeighestBlockMux  *sync.Mutex
-	RequiredBlocks    []uint64
-	RequiredBlocksMux *sync.Mutex
+	Node                          *Node
+	RemoteHosts                   []*RemoteHost
+	RemoteHostsMux                *sync.Mutex
+	HeighestBlock                 uint64
+	HeighestBlockMux              *sync.Mutex
+	RequiredBlocks                []RequiredBlock
+	RequiredBlocksProcessingQueue []RequiredBlock
+	RequiredBlocksMux             *sync.Mutex
 }
 
 type RemoteHost struct {
-	RhMux        *sync.Mutex
-	HeightMux    *sync.Mutex
-	Height       uint64
-	PeerID       peer.ID
-	Stream       network.Stream
-	BlockService *BlockService
+	RhMux         *sync.Mutex
+	HeightMux     *sync.Mutex
+	Height        uint64
+	InitialHeight uint64
+	PeerID        peer.ID
+	Stream        network.Stream
+	BlockService  *BlockService
 	// RW     *bufio.ReadWriter
 }
 
@@ -70,32 +79,98 @@ func (rm *RemoteHost) GetHeight() uint64 {
 // ClearRequiredBlock clears everything
 func (bs *BlockService) ClearRequiredBlock() {
 	bs.RequiredBlocksMux.Lock()
-	bs.RequiredBlocks = []uint64{}
+	bs.RequiredBlocks = []RequiredBlock{}
+	bs.RequiredBlocksProcessingQueue = []RequiredBlock{}
 	bs.RequiredBlocksMux.Unlock()
 }
 
 // AddRequiredBlock adds a blockno to the required blocks
-func (bs *BlockService) AddRequiredBlock(h uint64) {
+func (bs *BlockService) AddRequiredBlock(from uint64, to uint64, justAppend bool) {
 	bs.RequiredBlocksMux.Lock()
 	defer bs.RequiredBlocksMux.Unlock()
-	for _, v := range bs.RequiredBlocks {
-		if v == h {
-			return
+
+	if justAppend {
+		// remove from the processing queue
+		for s, v := range bs.RequiredBlocksProcessingQueue {
+			if v.from == from && v.to == to {
+				bs.RequiredBlocksProcessingQueue = append(bs.RequiredBlocksProcessingQueue[:s], bs.RequiredBlocksProcessingQueue[s+1:]...)
+				bs.RequiredBlocks = append(bs.RequiredBlocks, RequiredBlock{from, to})
+			}
 		}
+	} else {
+
+		// sort required blocks and procesing blocks
+		sort.Slice(bs.RequiredBlocks, func(i, j int) bool {
+			return bs.RequiredBlocks[i].from < bs.RequiredBlocks[j].from
+		})
+
+		sort.Slice(bs.RequiredBlocksProcessingQueue, func(i, j int) bool {
+			return bs.RequiredBlocksProcessingQueue[i].from < bs.RequiredBlocksProcessingQueue[j].from
+		})
+
+		// check if dupe in required blocks queue
+		for _, v := range bs.RequiredBlocks {
+			if v.from == from && v.to == to {
+				return
+			}
+		}
+
+		// check if dupe in processing queue
+		for _, v := range bs.RequiredBlocksProcessingQueue {
+			if v.from == from && v.to == to {
+				return
+			}
+		}
+
+		start := uint64(0)
+
+		for _, v := range bs.RequiredBlocks {
+			if v.to > start {
+				start = v.to
+			}
+		}
+
+		for _, v := range bs.RequiredBlocksProcessingQueue {
+			if v.to > start {
+				start = v.to
+			}
+		}
+
+		if start == 0 {
+			start = bs.Node.BlockChain.GetHeight() + 1
+		} else {
+			start++
+		}
+
+		if start < to {
+			for {
+				end := start + BlockRangeMax - 1
+				if end > to {
+					end = to
+				}
+				bs.RequiredBlocks = append(bs.RequiredBlocks, RequiredBlock{start, end})
+				start = end + 1
+				if end >= to {
+					break
+				}
+			}
+		} else if start == to {
+			bs.RequiredBlocks = append(bs.RequiredBlocks, RequiredBlock{start, to})
+		}
+
 	}
-	// log.Println("Need block ", h)
-	bs.RequiredBlocks = append(bs.RequiredBlocks, h)
+
 }
 
 // RemoveRequiredBlock removes from requiredBlocks
-func (bs *BlockService) RemoveRequiredBlock(h uint64, lock bool) bool {
+func (bs *BlockService) RemoveRequiredBlock(rb RequiredBlock, lock bool) bool {
 	if lock {
 		bs.RequiredBlocksMux.Lock()
 		defer bs.RequiredBlocksMux.Unlock()
 	}
 
 	for s, v := range bs.RequiredBlocks {
-		if v == h {
+		if v.from == rb.from && v.to == rb.to {
 			bs.RequiredBlocks = append(bs.RequiredBlocks[:s], bs.RequiredBlocks[s+1:]...)
 			return true
 		}
@@ -104,7 +179,7 @@ func (bs *BlockService) RemoveRequiredBlock(h uint64, lock bool) bool {
 }
 
 // PopNextRequiredBlock
-func (bs *BlockService) PopNextRequiredBlock() (uint64, bool) {
+func (bs *BlockService) PopNextRequiredBlock() (rqb RequiredBlock, success bool) {
 	bs.RequiredBlocksMux.Lock()
 	defer bs.RequiredBlocksMux.Unlock()
 
@@ -113,14 +188,15 @@ func (bs *BlockService) PopNextRequiredBlock() (uint64, bool) {
 
 	if len(bs.RequiredBlocks) > 0 {
 		sort.Slice(bs.RequiredBlocks, func(i, j int) bool {
-			return bs.RequiredBlocks[i] < bs.RequiredBlocks[j]
+			return bs.RequiredBlocks[i].from < bs.RequiredBlocks[j].from
 		})
 
 		poped := bs.RequiredBlocks[0]
 		bs.RemoveRequiredBlock(poped, false)
+		bs.RequiredBlocksProcessingQueue = append(bs.RequiredBlocksProcessingQueue, poped)
 		return poped, true
 	}
-	return 0, false
+	return rqb, false
 }
 
 // AddHeighestBlock adds the highest block found from peers
@@ -148,7 +224,7 @@ func (bs *BlockService) BlockHandler(s network.Stream) {
 		n, err := s.Read(chunk)
 
 		if err != nil {
-			log.Warn("stream closed from remote peer: ", err)
+			// log.Warn("Stream closed by remote peer: ", err)
 			return
 		}
 
@@ -193,17 +269,17 @@ func (bs *BlockService) BlockHandler(s network.Stream) {
 			bqResponse.NodeHeight = bsch.BlockChain.GetHeight()
 			if bqr.Type == BlockQueryType_HEIGHT {
 				// the request was for current height
-				bqResponse.Height = bqResponse.NodeHeight
+				bqResponse.From = bqResponse.NodeHeight
 				bqResponse.Payload = nil
 
 			} else if bqr.Type == BlockQueryType_BLOCK {
-				block, err := bs.Node.BlockChain.GetBlockByHeight(bqr.BlockNo)
-				log.Info("Sending block number ", bqr.BlockNo, " with hash ", hexutil.Encode(block.Hash))
+				blocks, err := bs.Node.BlockChain.GetBlocksByRange(bqr.BlockNoFrom, bqr.BlockNoTo)
+				// log.Info("Sending blocks range from: ", bqr.BlockNoFrom, " to: ", bqr.BlockNoTo)
 				if err != nil {
 					bqResponse.Error = true
 				} else {
-					bqResponse.Height = bqr.BlockNo
-					bqResponse.Payload = Serialize(block)
+					bqResponse.From = bqr.BlockNoFrom
+					bqResponse.Payload = blocks
 				}
 			}
 
@@ -250,18 +326,19 @@ func (bs *BlockService) RemoveFromRemoteHosts(peer peer.ID) error {
 	return errors.New("no connection to remote host")
 }
 
-func (rm *RemoteHost) Query(blockNo uint64) {
-	// log.Info("Query remote host with blockno ", blockNo)
+func (rm *RemoteHost) Query(from uint64, to uint64) {
+	log.Info("Query remote host with blockno ", from, to)
 	query := BlockQuery{
 		Type: BlockQueryType_HEIGHT,
 	}
 
-	if blockNo == 0 {
+	if from == 0 {
 		query.Type = BlockQueryType_HEIGHT
 
 	} else {
 		query.Type = BlockQueryType_BLOCK
-		query.BlockNo = blockNo
+		query.BlockNoFrom = from
+		query.BlockNoTo = to
 	}
 
 	queryBts, err := proto.Marshal(&query)
@@ -290,6 +367,7 @@ func (rm *RemoteHost) Read() {
 
 		if err != nil {
 			// log.Warn("stream closed from remote peer: ", err)
+			// rm.Close()
 			return
 		}
 
@@ -335,11 +413,11 @@ func (rm *RemoteHost) Read() {
 			}
 
 			if pl.BlockQueryResponse.Type == BlockQueryType_HEIGHT {
-				BlockRequiredGlobalMutex.Lock()
-				for i := rm.BlockService.Node.BlockChain.GetHeight() + 1; i <= pl.BlockQueryResponse.NodeHeight; i++ {
-					rm.BlockService.Node.BlockService.AddRequiredBlock(i)
-				}
-				BlockRequiredGlobalMutex.Unlock()
+				// BlockRequiredGlobalMutex.Lock()
+				// for i := rm.BlockService.Node.BlockChain.GetHeight() + 1; i <= pl.BlockQueryResponse.NodeHeight; i++ {
+				rm.BlockService.Node.BlockService.AddRequiredBlock(rm.InitialHeight, pl.BlockQueryResponse.NodeHeight, false)
+				// }
+				// BlockRequiredGlobalMutex.Unlock()
 			}
 
 			rm.AddHeight(pl.BlockQueryResponse.NodeHeight)
@@ -354,16 +432,19 @@ func (rm *RemoteHost) Read() {
 			}
 
 			if len(pl.BlockQueryResponse.Payload) > 0 {
-				block, _ := DeserializeBlock(pl.BlockQueryResponse.Payload)
-				log.Println("Downloaded Block:\t", hexutil.Encode(block.Hash), " From Peer:\t", pl.PeerID, " Height:\t", pl.BlockQueryResponse.Height)
+				for _, block := range pl.BlockQueryResponse.Payload {
+					log.Println("Downloaded Block:\t", hexutil.Encode(block.Hash), " From Peer:\t", pl.PeerID)
 
-				err := rm.BlockService.Node.BlockChain.AddBlockPool(block)
-				if err != nil {
-					log.Warn(err)
-					// rm.BlockService.Node.BlockChain.ClearBlockPool()
-					// rm.BlockService.Node.SetSyncing(false)
-					// rm.BlockService.Node.Sync(context.Background())
+					err := rm.BlockService.Node.BlockChain.AddBlockPool(*block)
+					if err != nil {
+
+						// log.Warn(err)
+						rm.BlockService.Node.BlockChain.ClearBlockPool()
+						rm.BlockService.Node.SetSyncing(false)
+						rm.BlockService.Node.Sync(context.Background())
+					}
 				}
+				// block, _ := DeserializeBlock(pl.BlockQueryResponse.Payload)
 
 			}
 
@@ -383,66 +464,49 @@ func (rm *RemoteHost) SendJob() {
 	hb := rm.BlockService.Node.BlockService.GetHeighestBlock()
 	nodesHeight := rm.BlockService.Node.BlockChain.GetHeight()
 
-	// log.Println("hb: ", hb, " nodesheight: ", nodesHeight)
+	log.Println("Sendjob:\tHeighest block: ", hb, " Nodes height: ", nodesHeight)
 	if hb > 0 && nodesHeight >= hb {
 		log.Println("All blocks downloaded")
 		rm.BlockService.Node.SetSyncing(false)
 		return
 	}
 
-	// for i := nodesHeight + 1; i <= hb; i++ {
-	// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
-	// }
-
 	job, ok := rm.BlockService.PopNextRequiredBlock()
 
-	// if !ok {
-	// 	tryGetNext := 0
-	// 	for {
-	// 		job, ok = rm.BlockService.PopNextRequiredBlock()
-	// 		if ok {
-	// 			break
-	// 		}
-	// 		time.Sleep(1 * time.Second)
-	// 		if tryGetNext > 2 {
-	// 			break
-	// 		}
-	// 		tryGetNext++
-	// 	}
-	// }
-
 	if ok {
-		if job > rm.GetHeight() {
+		thHeight := rm.GetHeight()
+		if job.from > thHeight || job.to > thHeight {
 			// we need to remove it from the array of remote hosts too
 			rm.BlockService.RemoveFromRemoteHosts(rm.PeerID)
 
-			// send back the value which we didnt use
-			rm.BlockService.AddRequiredBlock(job)
-
+			// send back the value which we didnt use exactly as before
+			rm.BlockService.AddRequiredBlock(job.from, job.to, true)
+			return
 		}
-		log.Println("Client Node: ", nodesHeight, " NetworkHeight: ", hb, " Sendjob height: ", job)
-		rm.Query(job)
+		log.Println("Sending Job:\t", job.from, job.to, "\tNode's height: ", nodesHeight, " Network height: ", hb)
+		rm.Query(job.from, job.to)
 	} else {
 		// at this point PopNextRequiredBlock is empty
 		// resync
-		// log.Println("EMPTY PopNextRequiredBlock")
+		log.Println("EMPTY PopNextRequiredBlock")
 		// for i := nodesHeight + 1; i <= hb; i++ {
 		// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
 		// }
 
-		rm.BlockService.Node.BlockChain.ClearBlockPool()
+		// rm.BlockService.Node.BlockChain.ClearBlockPool()
 		rm.BlockService.Node.SetSyncing(false)
-		// rm.BlockService.Node.Sync(context.Background())
+		rm.BlockService.Node.Sync(context.Background())
 	}
 
 }
 
 // NewRemoteHost
-func NewRemoteHost(ctx context.Context, bs *BlockService, p peer.ID) error {
+func NewRemoteHost(ctx context.Context, bs *BlockService, p peer.ID, currentBlockChainHeight uint64) error {
 	rh := &RemoteHost{
-		BlockService: bs,
-		HeightMux:    &sync.Mutex{},
-		RhMux:        &sync.Mutex{},
+		BlockService:  bs,
+		HeightMux:     &sync.Mutex{},
+		RhMux:         &sync.Mutex{},
+		InitialHeight: currentBlockChainHeight,
 	}
 	s, err := bs.Node.Host.NewStream(ctx, p, BlockServiceID)
 	if err != nil {
@@ -451,7 +515,7 @@ func NewRemoteHost(ctx context.Context, bs *BlockService, p peer.ID) error {
 	rh.Stream = s
 	rh.PeerID = p
 	bs.AddToRemoteHosts(rh)
-	go rh.Query(0)
+	go rh.Query(0, 0)
 	go rh.Read()
 	rh.BlockService.Node.SetSyncing(true)
 	return nil

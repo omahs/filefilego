@@ -53,13 +53,16 @@ enum BlockQueryType {
 
 message BlockQuery {
     BlockQueryType Type = 1;
-    uint64 BlockNo = 2;
+    uint64 BlockNoFrom = 2;
+    uint64 BlockNoTo = 3;
 }
 
 message BlockQueryResponse {
-    uint64 Height = 1;
-    bytes Payload = 2;
-    bool Error = 3;
-    BlockQueryType Type = 4;
-    uint64 NodeHeight = 5;
+    uint64 From = 1;
+    uint64 To = 2;
+    // bytes Payload = 3;
+    repeated Block Payload = 3;
+    bool Error = 4;
+    BlockQueryType Type = 5;
+    uint64 NodeHeight = 6;
 }

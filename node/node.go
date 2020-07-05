@@ -151,9 +151,10 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 	} else if gossip.Type == GossipPayload_BLOCK {
 		// node is syncing
-		if n.IsSyncing() {
-			return nil
-		}
+		// if n.IsSyncing() {
+		// 	return nil
+		// }
+
 		// find previous hash, and append it to
 		blc, _ := DeserializeBlock(gossip.Payload)
 		log.Println("New block broadcasted by verifiers\t", hexutil.Encode(blc.Hash))
@@ -286,9 +287,10 @@ func (n *Node) Sync(ctx context.Context) error {
 
 	// n.SetSyncing(true)
 	// produce blocks
+	currentHeight := n.BlockChain.GetHeight()
 	for _, p := range n.Peers() {
 		if n.Host.ID() != p {
-			go NewRemoteHost(ctx, n.BlockService, p)
+			go NewRemoteHost(ctx, n.BlockService, p, currentHeight)
 		}
 	}
 	return nil
