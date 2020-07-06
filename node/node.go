@@ -151,9 +151,9 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 	} else if gossip.Type == GossipPayload_BLOCK {
 		// node is syncing
-		if n.IsSyncing() {
-			return nil
-		}
+		// if n.IsSyncing() {
+		// 	return nil
+		// }
 
 		// find previous hash, and append it to
 		blc, _ := DeserializeBlock(gossip.Payload)
