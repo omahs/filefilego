@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math/rand"
 	"sort"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -19,7 +21,7 @@ var (
 	// BlockRequiredGlobalMutex = sync.Mutex{}
 
 	// BlockRangeMax used as "to" for block ranges
-	BlockRangeMax uint64 = 10000
+	BlockRangeMax uint64 = 100
 )
 
 type RequiredBlock struct {
@@ -488,12 +490,16 @@ func (rm *RemoteHost) SendJob() {
 	} else {
 		// at this point PopNextRequiredBlock is empty
 		// resync
-		log.Println("EMPTY PopNextRequiredBlock")
+		log.Println("PopNextRequiredBlock: empty")
+		rand.Seed(time.Now().UnixNano())
+		r := rand.Intn(2000)
+		time.Sleep(time.Duration(r) * time.Millisecond)
+
 		// for i := nodesHeight + 1; i <= hb; i++ {
 		// 	rm.BlockService.Node.BlockService.AddRequiredBlock(i)
 		// }
 
-		// rm.BlockService.Node.BlockChain.ClearBlockPool()
+		rm.BlockService.Node.BlockChain.ClearBlockPool()
 		rm.BlockService.Node.SetSyncing(false)
 		rm.BlockService.Node.Sync(context.Background())
 	}
