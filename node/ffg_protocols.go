@@ -21,7 +21,7 @@ var (
 	// BlockRequiredGlobalMutex = sync.Mutex{}
 
 	// BlockRangeMax used as "to" for block ranges
-	BlockRangeMax uint64 = 100
+	BlockRangeMax uint64 = 10000
 )
 
 type RequiredBlock struct {
