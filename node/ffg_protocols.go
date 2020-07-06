@@ -321,6 +321,9 @@ func (bs *BlockService) RemoveFromRemoteHosts(peer peer.ID) error {
 
 			// if all hosts removed then we have closed all streams
 			// so we stoped syncing
+			if len(bs.RemoteHosts) == 0 {
+				bs.Node.SetSyncing(false)
+			}
 
 			return nil
 		}
