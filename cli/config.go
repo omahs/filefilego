@@ -26,7 +26,7 @@ func DefaultConfig() *GlobalConfig {
 		RPC: RPC{
 			Enabled:         false,
 			Whitelist:       []string{"localhost"},
-			EnabledServices: []string{},
+			EnabledServices: []string{""},
 			HTTP: HTTPWsConfig{
 				Enabled:          false,
 				ListenPort:       8668,

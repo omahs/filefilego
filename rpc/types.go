@@ -28,6 +28,6 @@ type API struct {
 	Namespace    string
 	Version      string
 	Service      interface{}
-	Public       bool
+	Enabled      bool
 	AuthRequired string
 }

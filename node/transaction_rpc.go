@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/big"
 
@@ -23,6 +24,122 @@ type TransactionAPI struct {
 // NewTransactionAPI
 func NewTransactionAPI(node *Node) *TransactionAPI {
 	return &TransactionAPI{Node: node}
+}
+
+type RawTransaction struct {
+	Hash            string `json:"Hash,omitempty"`
+	PubKey          string `json:"PubKey,omitempty"`
+	Nounce          string `json:"Nounce,omitempty"`
+	Data            string `json:"Data,omitempty"`
+	From            string `json:"From,omitempty"`
+	To              string `json:"To,omitempty"`
+	Value           string `json:"Value,omitempty"`
+	TransactionFees string `json:"TransactionFees,omitempty"`
+	Signature       string `json:"Signature,omitempty"`
+}
+
+// SendRawTransaction sends a raw transaction to the network
+func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (string, error) {
+	tmpTx := Transaction{}
+	parsedTx := RawTransaction{}
+	json.Unmarshal([]byte(tx), &parsedTx)
+
+	rawTxHash, err := hexutil.Decode(parsedTx.Hash)
+	if err != nil {
+		return "", err
+	}
+
+	rawTxData := []byte{}
+	if parsedTx.Data != "" {
+		rawTxData, err = hexutil.Decode(parsedTx.Data)
+		if err != nil {
+			return "", err
+		}
+
+	}
+
+	rawTxSig, err := hexutil.Decode(parsedTx.Signature)
+	if err != nil {
+		return "", err
+	}
+
+	log.Println("len rawTxSig", len(rawTxSig), hexutil.Encode(rawTxSig))
+
+	tmpTx.Hash = rawTxHash
+	tmpTx.PubKey = parsedTx.PubKey
+	tmpTx.Nounce = parsedTx.Nounce
+	tmpTx.Data = rawTxData
+	tmpTx.From = parsedTx.From
+	tmpTx.To = parsedTx.To
+	tmpTx.Value = parsedTx.Value
+	tmpTx.TransactionFees = parsedTx.TransactionFees
+	tmpTx.Signature = rawTxSig
+
+	isValid, err := api.Node.BlockChain.IsValidTransaction(tmpTx)
+	if err != nil {
+		return "", err
+	}
+
+	if !isValid {
+		return "", errors.New("invalid/malformed transaction")
+	}
+
+	if len(tmpTx.To) > 100 || len(tmpTx.Value) > 500 || len(tmpTx.TransactionFees) > 500 || len(tmpTx.Nounce) > 100 {
+		return "", errors.New("fields size too big")
+	}
+
+	if len(tmpTx.Data) > MAX_TX_DATA_SIZE { // 300 KB
+		return "", errors.New("\"data\" field is too big")
+	}
+
+	if tmpTx.To == "" {
+		return "", errors.New("\"to\" is a required field")
+	}
+
+	val, err := hexutil.DecodeBig(tmpTx.Value)
+	if err != nil {
+		return "", err
+	}
+
+	txf, err := hexutil.DecodeBig(tmpTx.TransactionFees)
+	if err != nil {
+		txf, _ = new(big.Int).SetString("0", 10)
+	}
+
+	_, err = hexutil.DecodeBig(tmpTx.Nounce)
+	if err != nil {
+		return "", err
+	}
+
+	hasBalance, _, _, err := api.Node.BlockChain.HasThisBalance(tmpTx.From, val.Add(val, txf))
+	if err != nil {
+		return "", err
+	}
+
+	if hasBalance {
+		err = api.Node.BlockChain.AddMemPool(tmpTx)
+		if err != nil {
+			return "", err
+		}
+		// broadcast the transaction to the network
+		gpl := GossipPayload{
+			Type:    GossipPayload_TRANSACTION,
+			Payload: SerializeTransaction(tmpTx),
+		}
+
+		gplBts, err := proto.Marshal(&gpl)
+		if err != nil {
+			log.Warn("Error while marshaling transaction to protobuff: ", err)
+		} else {
+			// if api.Node.Peers().Len() > 1 {
+			api.Node.Gossip.Broadcast(gplBts)
+			// }
+		}
+
+		return hexutil.Encode(tmpTx.Hash), nil
+	}
+
+	return "", errors.New("Unable to send transaction. Check your balance")
 }
 
 // SendTransaction sends a transaction to the network
@@ -178,4 +295,14 @@ func (api *TransactionAPI) Receipt(ctx context.Context, hash string) (txpl Recei
 	}
 
 	return txpl, nil
+}
+
+// ByAddress
+func (api *TransactionAPI) ByAddress(ctx context.Context, address string) ([]Transaction, error) {
+	txs, err := api.Node.BlockChain.GetTransactionsByAddress(address)
+	if err != nil {
+		return txs, err
+	}
+
+	return txs, nil
 }

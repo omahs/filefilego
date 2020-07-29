@@ -12,9 +12,11 @@ import (
 func ServeHTTP(apis []API) http.HandlerFunc {
 	server := rpc.NewServer()
 	for _, api := range apis {
-		err := server.RegisterName(api.Namespace, api.Service)
-		if err != nil {
-			log.Fatal("Unable to register the jsonrpc namespace")
+		if api.Enabled {
+			err := server.RegisterName(api.Namespace, api.Service)
+			if err != nil {
+				log.Fatal("Unable to register the jsonrpc namespace")
+			}
 		}
 	}
 	return globalMidware(apis, server)

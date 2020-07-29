@@ -297,37 +297,46 @@ func (n *Node) Sync(ctx context.Context) error {
 }
 
 // StartRPCHTTP starts http json
-func (n *Node) StartRPCHTTP(ctx context.Context, address string, port int) error {
+func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, address string, port int) error {
 	apis := []brpc.API{
 		{
 			Namespace:    "transaction",
 			Version:      "1.0",
 			Service:      NewTransactionAPI(n),
-			Public:       true,
+			Enabled:      false,
 			AuthRequired: "",
 		},
 		{
 			Namespace:    "account",
 			Version:      "1.0",
 			Service:      NewAccountAPI(n),
-			Public:       true,
+			Enabled:      false,
 			AuthRequired: "",
 		},
 		{
 			Namespace:    "block",
 			Version:      "1.0",
 			Service:      NewBlockAPI(n),
-			Public:       true,
+			Enabled:      false,
 			AuthRequired: "",
 		},
 		{
 			Namespace:    "ffg",
 			Version:      "1.0",
 			Service:      NewFilefilegoAPI(n),
-			Public:       true,
+			Enabled:      false,
 			AuthRequired: "",
 		},
 	}
+
+	for i, v := range apis {
+		for _, j := range enabledServices {
+			if j == v.Namespace {
+				apis[i].Enabled = true
+			}
+		}
+	}
+
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/", brpc.ServeHTTP(apis))
 	handler := cors.AllowAll().Handler(serveMux)

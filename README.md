@@ -1,16 +1,20 @@
 # FileFileGo Decentralized Network
 
-A Peer-to-peer data sharing network with indexing/tracking, storage, full-text search and incentive mechanism form a decentralized network that allow users share data without a single point of failure and censorship. The architecture should be designed in a way to prevent censorship and privacy issues, improve data availability with an incentive system based on game-theory concepts, and achieve fault-tolerance. We propose a Peer-to-peer and decentralized data sharing network (FileFileGo) for the web3 era.
+A Peer-to-peer data sharing network with indexing/tracking, storage, full-text search and incentive mechanism form a decentralized network that allow users share data without a single point of failure and censorship. The architecture is designed in a way to prevent censorship and privacy issues, improves data availability with an incentive system based on game-theory concepts, and achieves fault-tolerance. To solve these challenges we propose a Peer-to-peer and decentralized data sharing network (FileFileGo) for the web3 era.
 
 We have seen the rise of the Internet from the first days until now. Open internet suffers from big corporations and ISPs which censor freedom of speech. We have seen acts and statements such as SOPA, PIPA, ACTA and so many more from law-makers with the goal of controlling the Internet and the flow of information.
 
 These days it's extremely difficult for sites like WikiLeaks, thepiratebay, and so on to operate without interruption and pressure from different oppressing parties. With these in mind, we have developed the FileFileGo protocol and stacks to allow users access and share data without a single point of failure.
 
+FileFileGo is not controlled by any individual. It's a joint effort by the Open-source community. The coin distribution is designed to be as fair as possible, with an emission of 15 Zaran (the native currency) per block which is divided by 2 every 24 months.
+
+FileFileGo is launched fairly - free of ICO/STO/IEO or pre-mine. We rely on a current PoA (Proof of Authority) consensus algorithm which will eventually be replaced by a PoS (Proof of Stake) to allow more parties participate in the project. Support the movement by contributing to the project and develop innovative ideas that respect our digital rights, privacy, freedom of information, freedom from Internet censorship, and net neutrality.
+
 # Installation
 
 ### Linux, macOS, and FreeBSD based systems
 
-#### Install requirements
+#### Installation requirements
 
 1. Download and install golang
 
@@ -195,14 +199,14 @@ A cyberlocker is a third-party online service that provides file-storing and fil
 
 ### Features
 
-FileFileGo combines the strength of Usenet, Blockchain/Cryptocurrency, DHT and some innovations behind Torrent to form a decentralized network that can't be censored and taken down by ISPs.
+FileFileGo combines the strength of Usenet, Blockchain/Cryptocurrency, DHT and innovations behind BitTorrent to form a decentralized network that can't be censored and taken down by ISPs.
 
 - Blockchain-based for indexing, tracking, and other network metadata and logic.
 - Encrypted traffic to prevent ISPs and other third parties from traffic inspection.
 - Privacy-first design, to relay traffic through a set of intermediate peers.
 - The peer-to-Peer design which replicates the state of the network on each full-node.
 - Native cryptocurrency to work as the "fuel" of the network.
-- Extremely low transaction fees compared to Ethereum/Bitcoin.
+- Extremely low and conditional transaction fees compared to Ethereum/Bitcoin.
 - Dynamic block size.
 - Block-time of 10 seconds.
 - RPC interface to build DApps.
@@ -229,12 +233,11 @@ In this section we will introduce technical terms and concepts used in FileFileG
 
 ### Channels
 
-Channels allow users to organize and group data. Its similar to a bucket or folder. For example all the content on Wikileaks can be placed within a channel called "Wikileaks".
-The channel creator inherits all the permissions required for updates and other channel related functionalities.
+Channels allow users to organize and group data. Its similar to a bucket or folder. For example all the content on Wikileaks can be placed within a channel called "Wikileaks". The channel creator inherits all the permissions required for updates and other channel related functionalities.
 
-###
+# Coin Distribution
 
-# Crypto-Economics Specification
+### The Coin
 
 | Unit                     | Value in Aran                     |
 | ------------------------ | --------------------------------- |

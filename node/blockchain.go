@@ -96,6 +96,34 @@ func (bc *Blockchain) GetTransactionByHash(hash string) (tx Transaction, blck Bl
 	return tx, blck, 0, errors.New("transaction not found")
 }
 
+// GetTransactionByHash
+func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []Transaction, err error) {
+	bci := bc.Iterator()
+	total := 0
+	for {
+		block := bci.Next()
+		for _, t := range block.Transactions {
+			if address == t.From || address == t.To {
+				tx = append(tx, *t)
+				total++
+			}
+			if total > 10 {
+				break
+			}
+
+		}
+
+		if total > 10 {
+			break
+		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+	return tx, nil
+}
+
 // GetBlockByHeight gets the block given its number (height)
 func (bc *Blockchain) GetBlockByHeight(number uint64) (bb Block, err error) {
 	if number < 0 {
@@ -420,7 +448,6 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 	if ok {
 		return true, nil
 	}
-
 	return false, nil
 }
 

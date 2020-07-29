@@ -141,7 +141,7 @@ func entry(ctx *cli.Context) error {
 
 	if cfg.RPC.Enabled {
 		if cfg.RPC.HTTP.Enabled {
-			go node.StartRPCHTTP(ctx2, cfg.RPC.HTTP.ListenAddress, cfg.RPC.HTTP.ListenPort)
+			go node.StartRPCHTTP(ctx2, cfg.RPC.EnabledServices, cfg.RPC.HTTP.ListenAddress, cfg.RPC.HTTP.ListenPort)
 		}
 		if cfg.RPC.Websocket.Enabled {
 			// node.StartRPCWebSocket()
