@@ -96,14 +96,24 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (s
 		return "", errors.New("\"to\" is a required field")
 	}
 
+	zero, _ := new(big.Int).SetString("0", 10)
+
 	val, err := hexutil.DecodeBig(tmpTx.Value)
 	if err != nil {
 		return "", err
 	}
 
+	if val.Cmp(zero) == -1 {
+		return "", errors.New("Value is negative")
+	}
+
 	txf, err := hexutil.DecodeBig(tmpTx.TransactionFees)
 	if err != nil {
 		txf, _ = new(big.Int).SetString("0", 10)
+	}
+
+	if txf.Cmp(zero) == -1 {
+		return "", errors.New("TransactionFees is negative")
 	}
 
 	_, err = hexutil.DecodeBig(tmpTx.Nounce)
@@ -161,14 +171,24 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token str
 		return "", errors.New("\"to\" is a required field")
 	}
 
+	zero, _ := new(big.Int).SetString("0", 10)
+
 	val, err := hexutil.DecodeBig(value)
 	if err != nil {
 		return "", err
 	}
 
+	if val.Cmp(zero) == -1 {
+		return "", errors.New("Value is negative")
+	}
+
 	txf, err := hexutil.DecodeBig(txfees)
 	if err != nil {
 		txf, _ = new(big.Int).SetString("0", 10)
+	}
+
+	if txf.Cmp(zero) == -1 {
+		return "", errors.New("TransactionFees is negative")
 	}
 
 	addrNounce, err := hexutil.DecodeBig(nounce)

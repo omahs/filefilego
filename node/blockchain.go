@@ -384,6 +384,7 @@ func (bc *Blockchain) SignTransaction(transaction Transaction, key *keystore.Key
 
 // IsValidTransaction checks if a tx is valid
 func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) {
+	zero, _ := new(big.Int).SetString("0", 10)
 	if len(transaction.Hash) == 0 || transaction.Hash == nil {
 		return false, errors.New("Hash is empty")
 	}
@@ -409,6 +410,20 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 
 	if transaction.Value == "" {
 		return false, errors.New("Value is empty")
+	}
+
+	val, err := hexutil.DecodeBig(transaction.Value)
+	if err != nil {
+		return false, errors.New("Value is malformed")
+	}
+
+	if val.Cmp(zero) == -1 {
+		return false, errors.New("Value is negative")
+	}
+
+	valFees, err := hexutil.DecodeBig(transaction.TransactionFees)
+	if valFees.Cmp(zero) == -1 {
+		return false, errors.New("Value is negative")
 	}
 
 	data := bytes.Join(
