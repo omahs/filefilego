@@ -318,7 +318,7 @@ func (api *TransactionAPI) Receipt(ctx context.Context, hash string) (txpl Recei
 }
 
 // ByAddress
-func (api *TransactionAPI) ByAddress(ctx context.Context, address string) ([]Transaction, error) {
+func (api *TransactionAPI) ByAddress(ctx context.Context, address string) ([]TransactionTimestamp, error) {
 	txs, err := api.Node.BlockChain.GetTransactionsByAddress(address)
 	if err != nil {
 		return txs, err

@@ -30,6 +30,12 @@ const blocksBucket = "blocks"
 const AccountsBucket = "accounts"
 const GenesisBlockHash = "6ed4b64198799637a4c71c25c927d68d81329211af10952f0306b93c16f63ae5"
 
+type TransactionTimestamp struct {
+	Transaction   Transaction
+	Timestamp     int64
+	Timestamp8601 string
+}
+
 // Blockchain implements interactions with a DB
 type Blockchain struct {
 	tip          []byte
@@ -97,14 +103,15 @@ func (bc *Blockchain) GetTransactionByHash(hash string) (tx Transaction, blck Bl
 }
 
 // GetTransactionByHash
-func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []Transaction, err error) {
+func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []TransactionTimestamp, err error) {
 	bci := bc.Iterator()
 	total := 0
 	for {
 		block := bci.Next()
 		for _, t := range block.Transactions {
 			if address == t.From || address == t.To {
-				tx = append(tx, *t)
+				tmp := TransactionTimestamp{Transaction: *t, Timestamp: block.Timestamp, Timestamp8601: time.Unix(block.Timestamp, 0).Format(time.RFC3339)}
+				tx = append(tx, tmp)
 				total++
 			}
 			if total > 10 {
