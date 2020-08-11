@@ -19,10 +19,10 @@ import (
 
 	"github.com/boltdb/bolt"
 	proto "github.com/golang/protobuf/proto"
-	"gitlab.com/younixcc/filefilego/common"
-	"gitlab.com/younixcc/filefilego/common/hexutil"
-	"gitlab.com/younixcc/filefilego/crypto"
-	"gitlab.com/younixcc/filefilego/keystore"
+	"github.com/filefilego/filefilego/common"
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/crypto"
+	"github.com/filefilego/filefilego/keystore"
 )
 
 const memPool = "mempool"

@@ -28,7 +28,7 @@ follow the instructions to install golang on your system
 1. Download and Compile:
 
 ```
-git clone https://gitlab.com/filefilego/filefilego.git
+git clone https://github.com/filefilego/filefilego.git
 cd filefilego/cli
 go build -o filefilego .
 ```
@@ -109,7 +109,7 @@ Download:
    Open a windows cmd/terminal and follow the instructions(use `dir` to navigate to your desired folder e.g. `C:/FileFileGo`):
 
 ```
-git clone https://gitlab.com/filefilego/filefilego.git
+git clone https://github.com/filefilego/filefilego.git
 cd filefilego/cli
 go build -o filefilego.exe .
 ```

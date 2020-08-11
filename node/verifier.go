@@ -5,7 +5,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/libp2p/go-libp2p-core/crypto"
-	ffgcrypto "gitlab.com/younixcc/filefilego/crypto"
+	ffgcrypto "github.com/filefilego/filefilego/crypto"
 )
 
 type Verifier struct {

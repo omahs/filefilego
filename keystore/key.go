@@ -15,7 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pborman/uuid"
-	"gitlab.com/younixcc/filefilego/crypto"
+	"github.com/filefilego/filefilego/crypto"
 	"golang.org/x/crypto/scrypt"
 )
 

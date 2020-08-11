@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/urfave/cli"
-	"gitlab.com/younixcc/filefilego/keystore"
+	"github.com/filefilego/filefilego/keystore"
 )
 
 var (

@@ -7,9 +7,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/keystore"
 	proto "github.com/golang/protobuf/proto"
-	"gitlab.com/younixcc/filefilego/common/hexutil"
-	"gitlab.com/younixcc/filefilego/keystore"
 )
 
 // Serialize serializes the block

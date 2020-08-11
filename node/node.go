@@ -25,9 +25,9 @@ import (
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/rs/cors"
-	"gitlab.com/younixcc/filefilego/common/hexutil"
-	"gitlab.com/younixcc/filefilego/keystore"
-	brpc "gitlab.com/younixcc/filefilego/rpc"
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/keystore"
+	brpc "github.com/filefilego/filefilego/rpc"
 )
 
 type PubSubMetadata struct {

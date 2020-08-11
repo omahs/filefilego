@@ -9,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	proto "github.com/golang/protobuf/proto"
-	"gitlab.com/younixcc/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/common/hexutil"
 )
 
 var (

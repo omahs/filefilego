@@ -1,4 +1,4 @@
-module gitlab.com/younixcc/filefilego
+module github.com/filefilego/filefilego
 
 go 1.13
 

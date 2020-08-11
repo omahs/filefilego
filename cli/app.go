@@ -14,11 +14,11 @@ import (
 
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/urfave/cli"
-	"gitlab.com/younixcc/filefilego/common"
-	"gitlab.com/younixcc/filefilego/common/hexutil"
-	"gitlab.com/younixcc/filefilego/keystore"
-	npkg "gitlab.com/younixcc/filefilego/node"
-	"gitlab.com/younixcc/filefilego/search"
+	"github.com/filefilego/filefilego/common"
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/keystore"
+	npkg "github.com/filefilego/filefilego/node"
+	"github.com/filefilego/filefilego/search"
 )
 
 var (
