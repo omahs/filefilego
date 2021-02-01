@@ -252,4 +252,4 @@ Channels allow users to organize and group data. Its similar to a bucket or fold
 
 **Total Supply:** 500 Million Zarans
 **Validation/Stake Reward:** 15 Zarans per Block
-**Supply Decrease Rate:** Devide by 2 every 24 months
+**Supply Decrease Rate:** Divide by 2 every 24 months
