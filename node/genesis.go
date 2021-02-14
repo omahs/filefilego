@@ -1,19 +1,28 @@
 package node
 
+import (
+	"github.com/filefilego/filefilego/common/hexutil"
+)
+
+// BlockchainSettings represents starting point of the blockchain
 type BlockchainSettings struct {
-	BlockTimeSeconds         int
-	InitialBlockReward       string
-	MaxSupply                string
-	DropRewardDays           int
-	DropRewardFactor         int
-	NamespaceEnabled         bool
-	NamespaceRegistrationFee string
-	Verifiers                []Verifier
+	Chain                    []byte     `json:"chain"`
+	GenesisHash              string     `json:"genesis_hash"`
+	BlockTimeSeconds         int        `json:"block_time_seconds"`
+	InitialBlockReward       string     `json:"initial_block_reward"`
+	MaxSupply                string     `json:"max_supply"`
+	DropRewardDays           int        `json:"drop_reward_days"`
+	DropRewardFactor         int        `json:"drop_reward_factor"`
+	NamespaceEnabled         bool       `json:"namespace_enabled"`
+	NamespaceRegistrationFee string     `json:"namespace_registration_fee"`
+	Verifiers                []Verifier `json:"verifiers"`
 }
 
 // GetBlockchainSettings returns the genesis data
 func GetBlockchainSettings() BlockchainSettings {
 	gen := BlockchainSettings{
+		Chain:                    hexutil.MustDecode("0x01"), // 1 for Mainnet, anything else for other chains
+		GenesisHash:              "c2005c6ea44df4800bbd56d857bb6cb727acde486869553d212056bea38438e9",
 		BlockTimeSeconds:         10,
 		InitialBlockReward:       "15000000000000000000",        // 15 zarans
 		MaxSupply:                "500000000000000000000000000", // 500M zarans

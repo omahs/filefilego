@@ -4,12 +4,12 @@ import (
 	"context"
 )
 
-// FilefilegoAPI
+// FilefilegoAPI represents the ffg service
 type FilefilegoAPI struct {
 	Node *Node
 }
 
-// NewFilefilegoAPI
+// NewFilefilegoAPI new instance of the service
 func NewFilefilegoAPI(node *Node) *FilefilegoAPI {
 	return &FilefilegoAPI{Node: node}
 }
@@ -31,17 +31,22 @@ func (api *FilefilegoAPI) Syncing(ctx context.Context) (FilefilegoResult, error)
 	return dt, nil
 }
 
-// BlockchainHeight
+// BlockchainHeight gets current blockchain height
 func (api *FilefilegoAPI) BlockchainHeight(ctx context.Context) (uint64, error) {
 	return api.Node.BlockChain.GetHeight(), nil
 }
 
-// PeerCount
+// PeerCount counts of peers on this node
 func (api *FilefilegoAPI) PeerCount(ctx context.Context) (int, error) {
 	return api.Node.Peers().Len(), nil
 }
 
-// Verifier
+// Verifier list of the first verifier
 func (api *FilefilegoAPI) Verifier(ctx context.Context) (string, error) {
 	return GetBlockchainSettings().Verifiers[0].Address, nil
+}
+
+// Settings returns current settings of the network
+func (api *FilefilegoAPI) Settings(ctx context.Context) (BlockchainSettings, error) {
+	return GetBlockchainSettings(), nil
 }

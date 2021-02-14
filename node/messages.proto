@@ -2,19 +2,10 @@ syntax="proto3";
 
 package node;
 
-
-
-// type Block struct {
-// 	Timestamp     int64
-// 	Data          []byte
-// 	PrevBlockHash []byte
-	
-// 	Hash         []byte
-// 	Signature    []byte
-// 	Transactions []Transaction
-// }
-
-
+message AddressState {
+	bytes Balance = 1;
+	bytes Nounce  = 2;
+}
 
 message Block {
     int64 Timestamp = 1;
@@ -35,6 +26,52 @@ message Transaction {
     string Value = 7;
     string TransactionFees = 8;
     bytes Signature = 9;
+    bytes Chain = 10;
+}
+
+enum ChanNodeType {
+    FILE = 0;
+    DIR = 1;
+    CHANNEL = 2;
+    SUBCHANNEL = 3;
+    ENTRY = 4;
+    OTHER = 5;
+}
+
+message ChanNode {
+    string Name = 1;
+    string Hash = 2;
+    string Size = 3;
+    string Owner = 4;
+    bool Enabled = 5;
+    ChanNodeType NodeType = 6;
+    string ParentHash = 7;
+    string Description = 8;
+    string ContentType = 9;
+    repeated string Attributes = 10;
+    repeated string Admins = 11;
+
+}
+
+enum TransactionDataPayloadType {
+    NONE = 0;
+    UPDATE_BLOCKCHAIN_SETTINGS = 1;
+    CREATE_NODE = 2;
+    UPDATE_NODE = 3;
+}
+
+message TransactionDataPayload {
+    TransactionDataPayloadType Type = 1;
+    bytes Payload = 2;
+}
+
+message ChanActionCreateNode {
+    string ParentHash = 1;
+    string Name = 2;
+    ChanNodeType NodeType = 3;
+    string Description = 4;
+    string ContentType = 5;
+    repeated string Attributes = 6;
 }
 
 message GossipPayload {

@@ -13,9 +13,8 @@ require (
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
-	github.com/gogo/protobuf v1.3.1
-	github.com/golang/protobuf v1.3.5
-	github.com/hako/durafmt v0.0.0-20191009132224-3f39dc1ed9f4
+	github.com/golang/protobuf v1.4.1
+	github.com/hako/durafmt v0.0.0-20191009132224-3f39dc1ed9f4 // indirect
 	github.com/jmhodges/levigo v1.0.0 // indirect
 	github.com/libp2p/go-libp2p v0.7.4
 	github.com/libp2p/go-libp2p-connmgr v0.2.1
@@ -37,4 +36,5 @@ require (
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c // indirect
 	github.com/urfave/cli v1.22.4
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
+	google.golang.org/protobuf v1.25.0
 )

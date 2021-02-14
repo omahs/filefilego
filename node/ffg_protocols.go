@@ -9,10 +9,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	proto "github.com/golang/protobuf/proto"
+	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/filefilego/filefilego/common/hexutil"
+	proto "google.golang.org/protobuf/proto"
 )
 
 var (

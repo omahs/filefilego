@@ -10,12 +10,15 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	proto "google.golang.org/protobuf/proto"
 
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/keystore"
+	brpc "github.com/filefilego/filefilego/rpc"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	mplex "github.com/libp2p/go-libp2p-mplex"
@@ -25,9 +28,6 @@ import (
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/rs/cors"
-	"github.com/filefilego/filefilego/common/hexutil"
-	"github.com/filefilego/filefilego/keystore"
-	brpc "github.com/filefilego/filefilego/rpc"
 )
 
 type PubSubMetadata struct {
@@ -138,7 +138,7 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 			log.Warn("Error while validating tx from broadcast: ", err)
 		}
 
-		if len(tx.Data) > MAX_TX_DATA_SIZE {
+		if len(tx.Data) > MaxTxDataSize {
 			log.Warn("a transaction with long data field was rejected. ", hexutil.Encode(tx.Hash))
 			return errors.New("a transaction with long data field was rejected. " + hexutil.Encode(tx.Hash))
 		}
@@ -324,6 +324,13 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 			Namespace:    "ffg",
 			Version:      "1.0",
 			Service:      NewFilefilegoAPI(n),
+			Enabled:      false,
+			AuthRequired: "",
+		},
+		{
+			Namespace:    "channel",
+			Version:      "1.0",
+			Service:      NewChannelAPI(n),
 			Enabled:      false,
 			AuthRequired: "",
 		},

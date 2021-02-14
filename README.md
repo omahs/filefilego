@@ -233,7 +233,16 @@ In this section we will introduce technical terms and concepts used in FileFileG
 
 ### Channels
 
-Channels allow users to organize and group data. Its similar to a bucket or folder. For example all the content on Wikileaks can be placed within a channel called "Wikileaks". The channel creator inherits all the permissions required for updates and other channel related functionalities.
+Channels allow users to organize and group data. Its similar to a bucket or a folder. For example all the content on Wikileaks can be placed within a channel called "Wikileaks". The channel creator inherits all the permissions required for updates and other channel related functionalities. Channels are represented in a node-chain format, and is denoted as a node without `ParentHash`
+
+### Sub Channel
+
+The concept of a sub-channel is to be able to categorize data even further. For instance, documents, pictures or music.
+
+### Entry & File/Directory
+
+In filefilego an `Entry` represents a post or a piece of data that contains more information about the entry itself rather than categorization/ordering. `File` and `Directory` can be placed into an `Entry`.
+
 
 # Coin Distribution
 

@@ -9,7 +9,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/gogo/protobuf/proto"
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
 	sha3 "golang.org/x/crypto/sha3"
 )
@@ -72,12 +71,6 @@ func Sha256Hash(data []byte) hash.Hash {
 	d := sha3.New256()
 	d.Write(data)
 	return d
-}
-
-// HashProtoMsg marshals the proto message and returns a sha256 hash
-func HashProtoMsg(message proto.Message) ([]byte, error) {
-	bin, err := proto.Marshal(message)
-	return Sha256Hash(bin).Sum(nil), err
 }
 
 // HashFile hashes the file with the sha256
