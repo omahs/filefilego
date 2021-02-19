@@ -73,6 +73,13 @@ func Sha256Hash(data []byte) hash.Hash {
 	return d
 }
 
+// Sha256HashHexBytes retuens the hex representation of data
+func Sha256HashHexBytes(data []byte) []byte {
+	hash := sha256.Sum256(data)
+	bts := hash[:]
+	return bts
+}
+
 // HashFile hashes the file with the sha256
 func HashFile(file io.Reader) []byte {
 	h := sha256.New()

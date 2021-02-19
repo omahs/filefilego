@@ -243,6 +243,19 @@ The concept of a sub-channel is to be able to categorize data even further. For 
 
 In filefilego an `Entry` represents a post or a piece of data that contains more information about the entry itself rather than categorization/ordering. `File` and `Directory` can be placed into an `Entry`.
 
+### Data Storage Layer ("BINLAYER")
+
+`Binlayer` is the storage layer which tracks binary data, which are used by hash pointers within the blockchain to refer to a piece of data. The `ChanNode` structure has a filed called `BinlayerHash` which refers to the binary hash and is in the form of `"{HASH_ALGORITHM}:>{DATA_HASH}"`. We would like to keep the metadata of the hashing algorithm used as it might be useful in future.
+
+### Full-text Index/Search
+
+Search accuracy and flexibility is as important as the core blockchain. The aim is to be able to build complex queries including binary searches using a specific query language. For instance, we should allow queries of these types:
+1. Required or inclusive ("filefilego coin"), which means both "filefilego" and "coin" are required.
+2. Optional or exclusive ("filefilego currency"), which means one of those words can be excluded.
+
+The development of a query language that allows complex queries is a powerful tool that can be used to increase the accuracy of the search engine.
+
+There is the option to disable the full-text indexing functionality of a node by using the `--fulltex` cli flag.
 
 # Coin Distribution
 

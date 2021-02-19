@@ -22,11 +22,42 @@ func IsValidChannelPayload(t Transaction, currentBalance *big.Int) bool {
 	bts, _ = proto.Marshal(&ap)
 	afterUnmarshalHex := hexutil.Encode(bts)
 
-	// check if balance is available to register a namespace
-	if originHex != afterUnmarshalHex && ap.Type == TransactionDataPayloadType_CREATE_NODE {
-		var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
-		if currentBalance.Cmp(regFee) < 0 {
+	// ALL channel operations must send the tx to valid verifier addrs
+	if originHex != afterUnmarshalHex {
+		destinationAddrIsVerifier := false
+		for _, v := range GetBlockchainSettings().Verifiers {
+			if v.Address == t.To {
+				destinationAddrIsVerifier = true
+				break
+			}
+		}
+
+		if !destinationAddrIsVerifier {
+			log.Warn("Trying to register a namespace with incorrect destination address")
 			return false
+		}
+	}
+
+	//  if registering a channel: check for enough balance and
+	if originHex != afterUnmarshalHex && ap.Type == TransactionDataPayloadType_CREATE_NODE {
+
+		chaNode := ChanNode{}
+		err := proto.Unmarshal(ap.Payload, &chaNode)
+		if err != nil {
+			return false
+		}
+
+		// if channel, MUST have no parent hash, and enough balance
+		if chaNode.NodeType == ChanNodeType_CHANNEL {
+			if chaNode.ParentHash != "" {
+				return false
+			}
+
+			var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
+			if currentBalance.Cmp(regFee) < 0 {
+				log.Warn("not much balance for namespace registration: ", chaNode.Name, " desc: ", chaNode.Description)
+				return false
+			}
 		}
 	}
 

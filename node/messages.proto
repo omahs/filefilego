@@ -1,6 +1,7 @@
 syntax="proto3";
-
 package node;
+
+import "google/protobuf/timestamp.proto"; 
 
 message AddressState {
 	bytes Balance = 1;
@@ -29,30 +30,6 @@ message Transaction {
     bytes Chain = 10;
 }
 
-enum ChanNodeType {
-    FILE = 0;
-    DIR = 1;
-    CHANNEL = 2;
-    SUBCHANNEL = 3;
-    ENTRY = 4;
-    OTHER = 5;
-}
-
-message ChanNode {
-    string Name = 1;
-    string Hash = 2;
-    string Size = 3;
-    string Owner = 4;
-    bool Enabled = 5;
-    ChanNodeType NodeType = 6;
-    string ParentHash = 7;
-    string Description = 8;
-    string ContentType = 9;
-    repeated string Attributes = 10;
-    repeated string Admins = 11;
-
-}
-
 enum TransactionDataPayloadType {
     NONE = 0;
     UPDATE_BLOCKCHAIN_SETTINGS = 1;
@@ -65,13 +42,32 @@ message TransactionDataPayload {
     bytes Payload = 2;
 }
 
-message ChanActionCreateNode {
-    string ParentHash = 1;
-    string Name = 2;
-    ChanNodeType NodeType = 3;
-    string Description = 4;
-    string ContentType = 5;
-    repeated string Attributes = 6;
+
+
+enum ChanNodeType {
+    FILE = 0;
+    DIR = 1;
+    CHANNEL = 2;
+    SUBCHANNEL = 3;
+    ENTRY = 4;
+    OTHER = 5;
+}
+
+message ChanNode {
+    string Name = 1;
+    string Hash = 2;
+    string BinlayerHash = 3;
+    string Size = 4;
+    string Owner = 5;
+    bool Enabled = 6;
+    ChanNodeType NodeType = 7;
+    string ParentHash = 8;
+    string Description = 9;
+    string ContentType = 10;
+    repeated string Attributes = 11;
+    repeated string Admins = 12;
+    repeated string Posters = 13;
+    google.protobuf.Timestamp Timestamp = 14;
 }
 
 message GossipPayload {

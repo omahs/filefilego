@@ -1,12 +1,14 @@
 package main
 
 type Global struct {
-	LogLevel    string
-	DataDir     string
-	KeystoreDir string
-	Mine        bool
-	MineKeypath string
-	MinePass    string
+	LogLevel            string
+	DataDir             string
+	KeystoreDir         string
+	Mine                bool
+	MineKeypath         string
+	MinePass            string
+	FullText            bool
+	FullTextResultCount int
 }
 
 // Host

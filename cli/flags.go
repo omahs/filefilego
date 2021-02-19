@@ -39,6 +39,16 @@ var (
 		Usage: "Passphrase of keyfile",
 	}
 
+	FullText = cli.BoolFlag{
+		Name:  "fulltext",
+		Usage: "Enable full-text indexing",
+	}
+
+	FullTextResultCount = cli.IntFlag{
+		Name:  "fulltextresultcount",
+		Usage: "Max number of documents per search query",
+	}
+
 	RPCFlag = cli.BoolFlag{
 		Name:  "rpc",
 		Usage: "Enable JSON-RPC protocol",
@@ -152,6 +162,8 @@ var AppFlags = []cli.Flag{
 	MineFlag,
 	MineKeypath,
 	MinePass,
+	FullText,
+	FullTextResultCount,
 
 	RPCFlag,
 	RPCServicesFlag,

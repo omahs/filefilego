@@ -15,12 +15,14 @@ import (
 func DefaultConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Global: Global{
-			LogLevel:    "TRACE",
-			DataDir:     DefaultDataDir(),
-			KeystoreDir: filepath.Join(DefaultDataDir(), "keystore"),
-			Mine:        false,
-			MineKeypath: "",
-			MinePass:    "",
+			LogLevel:            "TRACE",
+			DataDir:             DefaultDataDir(),
+			KeystoreDir:         filepath.Join(DefaultDataDir(), "keystore"),
+			Mine:                false,
+			MineKeypath:         "",
+			MinePass:            "",
+			FullText:            false,
+			FullTextResultCount: 200,
 		},
 		Host: Host{},
 		RPC: RPC{
@@ -96,6 +98,14 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 
 	if ctx.GlobalIsSet(MinePass.Name) {
 		cfg.Global.MinePass = ctx.GlobalString(MinePass.Name)
+	}
+
+	if ctx.GlobalIsSet(FullText.Name) {
+		cfg.Global.FullText = ctx.GlobalBool(FullText.Name)
+	}
+
+	if ctx.GlobalIsSet(FullTextResultCount.Name) {
+		cfg.Global.FullTextResultCount = ctx.GlobalInt(FullTextResultCount.Name)
 	}
 
 	// Host

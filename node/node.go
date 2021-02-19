@@ -19,6 +19,7 @@ import (
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/keystore"
 	brpc "github.com/filefilego/filefilego/rpc"
+	"github.com/filefilego/filefilego/search"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	mplex "github.com/libp2p/go-libp2p-mplex"
@@ -60,11 +61,13 @@ type Node struct {
 	BlockChain       *Blockchain
 	isSyncing        bool
 	IsSyncingMux     *sync.Mutex
+	SearchEngine     *search.SearchEngine
 }
 
-func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore) (Node, error) {
+func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine) (Node, error) {
 	node := Node{
 		IsSyncingMux: &sync.Mutex{},
+		SearchEngine: se,
 	}
 	host, err := libp2p.New(ctx,
 		libp2p.Identity(key.Private),

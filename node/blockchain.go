@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/ptypes"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/boltdb/bolt"
@@ -22,12 +23,16 @@ import (
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/crypto"
 	"github.com/filefilego/filefilego/keystore"
+	"github.com/filefilego/filefilego/search"
 	proto "google.golang.org/protobuf/proto"
 )
 
 const memPool = "mempool"
 const blocksBucket = "blocks"
 const accountsBucket = "accounts"
+const channelBucket = "channels"
+const nodesBucket = "nodes"
+const nodeNodesBucket = "node_nodes"
 
 // TransactionTimestamp represents a transaction and its timestamps
 type TransactionTimestamp struct {
@@ -49,6 +54,12 @@ type Blockchain struct {
 	MemPool      []Transaction
 	MemPoolMux   sync.Mutex
 	Node         *Node
+}
+
+// ChanNodeIterator is used to iterate over channel nodes
+type ChanNodeIterator struct {
+	currentHash []byte
+	db          *bolt.DB
 }
 
 // BlockchainIterator is used to iterate over blockchain blocks
@@ -275,6 +286,236 @@ func (bc *Blockchain) SubBalanceOf(address string, amount *big.Int, nounce strin
 		})
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// MutateChannel performs channel/nodes mutations
+// OPTIONAL: 1. Checking for tx.To since we already checked
+//			 2. Balance requirements depending on node type
+//			 3. isMiningMode is used to avoid constraints when normal nodes receive a block.
+func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int, isMiningMode bool) error {
+	ap := TransactionDataPayload{}
+	bts, _ := proto.Marshal(&ap)
+	originHex := hexutil.Encode(bts) // need this to see if the ChanActionPayload is the same after unmarshalling
+	if err := proto.Unmarshal(t.Data, &ap); err != nil {
+		log.Warn("Invalid transaction payload of type ChanActionPayload. Ignore as it's possible to store any arbitrary data", err)
+		return err
+	}
+
+	bts, _ = proto.Marshal(&ap)
+	afterUnmarshalHex := hexutil.Encode(bts)
+
+	// for each TransactionDataPayloadType do the appropriate unmarshalling
+	if originHex != afterUnmarshalHex {
+		switch ap.Type {
+		case TransactionDataPayloadType_CREATE_NODE:
+			{
+				// unmarshal the payload
+				chaNode := ChanNode{}
+				if err := proto.Unmarshal(ap.Payload, &chaNode); err != nil {
+					return err
+				}
+
+				// NodeHash := channel name + tx from + cha desc + tx hash
+				data := bytes.Join(
+					[][]byte{
+						[]byte(chaNode.Name),
+						[]byte(chaNode.Size),
+						[]byte(t.From),
+						[]byte(chaNode.ParentHash),
+						[]byte(chaNode.Description),
+						[]byte(chaNode.ContentType),
+						t.Hash,
+					},
+					[]byte{},
+				)
+
+				chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
+				chaNode.Owner = t.From
+				chaNode.Timestamp = ptypes.TimestampNow()
+
+				// if channel remove parent as a security measure
+				if chaNode.NodeType == ChanNodeType_CHANNEL {
+					chaNode.ParentHash = ""
+					chaNode.Size = ""
+					chaNode.ContentType = ""
+				}
+
+				if chaNode.NodeType == ChanNodeType_OTHER || chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE || chaNode.NodeType == ChanNodeType_ENTRY || chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+					// check if parent hash exists and correct permissions:
+					// 1. If its admin or
+					if chaNode.ParentHash == "" {
+						return errors.New("ParentHash not specified")
+					}
+
+					// check if parent hash is available
+					err := bc.db.View(func(tx *bolt.Tx) error {
+						b := tx.Bucket([]byte(nodesBucket))
+						exists := b.Get([]byte(chaNode.ParentHash))
+						if exists == nil {
+							return errors.New("ParentHash Node is not in the blockchain")
+						}
+
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+
+					// go back to the root and find the permissions
+					cni := bc.ChanNodeIterator([]byte(chaNode.ParentHash))
+					nodesIndex := uint64(0)
+					for {
+						parentNode := cni.Next()
+						nodesIndex++
+
+						// apply structure constrains here
+						if nodesIndex == 1 {
+							if chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+									return errors.New("SUBCHANNEL allowed only in channels and other subchnnels")
+								}
+							}
+
+							if chaNode.NodeType == ChanNodeType_ENTRY {
+								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+									return errors.New("ENTRY allowed only in channels and other subchnnels")
+								}
+							}
+
+							if chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE {
+								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL || parentNode.NodeType == ChanNodeType_ENTRY) {
+									return errors.New("DIR/FILE allowed only in channels, subchnnels and entries")
+								}
+							}
+
+							if chaNode.NodeType == ChanNodeType_OTHER {
+								if parentNode.NodeType != ChanNodeType_ENTRY {
+									return errors.New("OTHER allowed only in entry")
+								}
+							}
+						}
+
+						if parentNode.ParentHash == "" {
+							hasPermission, isPoster, isGuest := false, false, false
+
+							// if an admin
+							if parentNode.Owner == t.From {
+								hasPermission = true
+							}
+
+							// if in admins
+							for _, v := range parentNode.Admins {
+								if v == t.From {
+									hasPermission = true
+									break
+								}
+							}
+
+							// if in posters or wildcard * is applied then allow as poster
+							for _, v := range parentNode.Posters {
+								if v == t.From {
+									hasPermission = true
+									isPoster = true
+									break
+								} else if v == "*" {
+									hasPermission = true
+									isPoster = true
+								}
+							}
+
+							// if nodetype is OTHER (could be comment)
+							if chaNode.NodeType == ChanNodeType_OTHER && !hasPermission {
+								hasPermission = true
+								isGuest = true
+							}
+
+							// if poster, then allow only to add ENTRY and DIR and FILE and OTHER
+							if isPoster && chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+								return errors.New("Poster can not create channel and subchannel")
+							}
+
+							if !hasPermission {
+								return errors.New("No permission to create node")
+							}
+
+							// if its a guest who posting OTHER type of nodes which might be a comment then apply fees
+							if isGuest && isMiningMode {
+								// apply fees
+								currentBalance, ok := vbalances[t.From]
+								if !ok {
+									log.Fatal("couldn't get the balance of address. This shouldn't have happened")
+								}
+								var commentFees, _ = new(big.Int).SetString(GetBlockchainSettings().NodeCreationFeesGuest, 10)
+								if currentBalance.Cmp(commentFees) < 0 {
+									return errors.New("No enough balance to post")
+								}
+							}
+
+							break
+						}
+					}
+				}
+
+				blkBts, _ := proto.Marshal(&chaNode)
+
+				err := bc.db.Update(func(tx *bolt.Tx) error {
+					b := tx.Bucket([]byte(nodesBucket))
+					exists := b.Get([]byte(chaNode.Hash))
+					if exists != nil {
+						return errors.New("Node hash already exists in the blockchain")
+					}
+
+					err := b.Put([]byte(chaNode.Hash), blkBts)
+					if err != nil {
+						return err
+					}
+
+					// if channel then update the channels bucket
+					if chaNode.NodeType == ChanNodeType_CHANNEL {
+						chBucket := tx.Bucket([]byte(channelBucket))
+						err := chBucket.Put([]byte(chaNode.Hash), []byte(""))
+						if err != nil {
+							return err
+						}
+					} else {
+						// add relations by using the intermidiate bucket
+						chBucket := tx.Bucket([]byte(nodeNodesBucket))
+						key := bytes.Join([][]byte{
+							[]byte(chaNode.ParentHash),
+							[]byte(chaNode.Hash),
+						}, []byte{})
+						err := chBucket.Put(key, []byte(chaNode.Hash))
+						if err != nil {
+							return err
+						}
+					}
+
+					// index fulltext
+					if bc.Node.SearchEngine.Enabled && chaNode.NodeType != ChanNodeType_OTHER {
+						indexItem := search.IndexItem{Hash: chaNode.Hash, Type: int32(chaNode.NodeType), Name: chaNode.Name, Description: chaNode.Description}
+						bc.Node.SearchEngine.IndexItem(indexItem)
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					return err
+				}
+
+				log.Println("Created a channel")
+			}
+		case TransactionDataPayloadType_UPDATE_NODE:
+			{
+				//
+			}
+		case TransactionDataPayloadType_UPDATE_BLOCKCHAIN_SETTINGS:
+			{
+				//
+			}
 		}
 	}
 	return nil
@@ -563,6 +804,14 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 						log.Println("mutation error", err)
 
 					}
+
+					// perform channel mutations if available
+					vbalances := make(map[string]*big.Int)
+					err = bc.MutateChannel(*vc, vbalances, false)
+					if err != nil {
+						log.Println("MUTATION CHAN ERROR: ", err)
+					}
+
 					bc.RemoveMemPool(vc)
 				}
 				bc.AddHeight(1)
@@ -794,6 +1043,12 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) Block {
 	return newBlock
 }
 
+// ChanNodeIterator returns a ChanNodeIterator
+func (bc *Blockchain) ChanNodeIterator(hash []byte) *ChanNodeIterator {
+	bci := &ChanNodeIterator{hash, bc.db}
+	return bci
+}
+
 // Iterator returns a BlockchainIterat
 func (bc *Blockchain) Iterator() *BlockchainIterator {
 	bci := &BlockchainIterator{bc.tip, bc.db}
@@ -845,6 +1100,19 @@ func (bc *Blockchain) GetAddressData(address string) (ads AddressState, merr Add
 }
 
 type transform func(Block)
+type transformNode func(ChanNode)
+
+// TraverseChanNodes goes through all the channel nodes up to parent
+func (bc *Blockchain) TraverseChanNodes(hash []byte, fn transformNode) {
+	bci := bc.ChanNodeIterator(hash)
+	for {
+		chanNode := bci.Next()
+		fn(chanNode)
+		if chanNode.ParentHash == "" || len(chanNode.ParentHash) == 0 {
+			break
+		}
+	}
+}
 
 // TraverseChain goes through all the blocks
 func (bc *Blockchain) TraverseChain(fn transform) {
@@ -866,7 +1134,7 @@ type TxNounce struct {
 }
 
 // PreparePoolBlocksForMining gets txs from mempool and prepares them
-func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
+func (bc *Blockchain) PreparePoolBlocksForMining() ([]*Transaction, map[string]*big.Int) {
 	// 1. check if a tx is valid structure (hash, sig, etc.)
 	// 2. check if the nounce is the next one of the current db nounce
 	// 3. check if address has enough balance
@@ -1026,7 +1294,7 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 		}
 		bc.RemoveMemPool(&v)
 	}
-	return verifiedTxs
+	return verifiedTxs, vbalances
 }
 
 // CalculateReward calculates the reward for each block given the begining of the genesis timestamp
@@ -1040,7 +1308,7 @@ func (bc *Blockchain) MineScheduler() {
 	for {
 		<-time.After(time.Duration(GetBlockchainSettings().BlockTimeSeconds) * time.Second)
 
-		txs := bc.PreparePoolBlocksForMining()
+		txs, vbalances := bc.PreparePoolBlocksForMining()
 
 		for _, v := range txs {
 			log.Info("prepareing to seal tx ", hexutil.Encode(v.Hash), " with nounce: ", v.Nounce)
@@ -1071,6 +1339,13 @@ func (bc *Blockchain) MineScheduler() {
 			err := bc.MutateAddressStateFromTransaction(*v, isCoinbase)
 			if err != nil {
 				log.Println("mutation error", err, isCoinbase)
+				continue
+			}
+
+			// perform channel mutations if available
+			err = bc.MutateChannel(*v, vbalances, true)
+			if err != nil {
+				log.Println("MUTATION CHAN ERROR: ", err)
 			}
 		}
 		bc.AddHeight(1)
@@ -1093,6 +1368,28 @@ func (bc *Blockchain) MineScheduler() {
 		}
 
 	}
+}
+
+// Next returns next node starting from the tip
+func (i *ChanNodeIterator) Next() ChanNode {
+	var blckDt []byte
+	err := i.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		v := b.Get(i.currentHash)
+		blckDt = make([]byte, len(v))
+		copy(blckDt, v)
+		return nil
+	})
+
+	chNode := ChanNode{}
+
+	err = proto.Unmarshal(blckDt, &chNode)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	i.currentHash = []byte(chNode.ParentHash)
+	return chNode
 }
 
 // Next returns next block starting from the tip
@@ -1213,7 +1510,13 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 			log.Println("Genesis block hash ", hex.EncodeToString(block.Hash))
 
 			// create the buckets
-			accBucket, err := tx.CreateBucket([]byte(accountsBucket))
+			tx.CreateBucketIfNotExists([]byte(memPool))
+			tx.CreateBucketIfNotExists([]byte(channelBucket))
+			tx.CreateBucketIfNotExists([]byte(nodesBucket))
+			tx.CreateBucketIfNotExists([]byte(nodeNodesBucket))
+
+			accBucket, err := tx.CreateBucketIfNotExists([]byte(accountsBucket))
+			// accBucket, err := tx.CreateBucket([]byte(accountsBucket))
 			if err != nil {
 				log.Panic(err)
 			}
@@ -1233,9 +1536,7 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 
 			err = accBucket.Put([]byte(GetBlockchainSettings().Verifiers[0].Address), blkBts)
 
-			tx.CreateBucket([]byte(memPool))
-
-			b, err := tx.CreateBucket([]byte(blocksBucket))
+			b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
 			if err != nil {
 				log.Panic(err)
 			}

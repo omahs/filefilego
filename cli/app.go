@@ -12,13 +12,13 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/urfave/cli"
 	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/keystore"
 	npkg "github.com/filefilego/filefilego/node"
 	"github.com/filefilego/filefilego/search"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -42,24 +42,18 @@ func init() {
 func entry(ctx *cli.Context) error {
 	cfg := GetConfig(ctx)
 
-	se, err := search.NewSearchEngine(cfg.Global.DataDir + "/" + "searchidx/db.bleve")
-	if err != nil {
-		log.Fatal("Unable to load or create the search index", err)
+	searchEngine := &search.SearchEngine{}
+	if cfg.Global.FullText {
+		se, err := search.NewSearchEngine(cfg.Global.DataDir+"/"+"searchidx/db.bleve", cfg.Global.FullTextResultCount)
+		if err != nil {
+			log.Fatal("Unable to load or create the search index", err)
+		}
+		searchEngine = &se
+		searchEngine.Enabled = true
+		log.Println("Full-text indexing is enabled")
+	} else {
+		log.Println("Full-text indexing is disabled")
 	}
-
-	// sitem := search.IndexItem{
-	// 	ID:   "idofitem",
-	// 	From: "fromme@mdsdsdsda.com",
-	// 	Body: "bleve indexing is easy",
-	// }
-
-	// se.IndexItem(sitem)
-	// res, _ := se.Search("eas")
-	se.Search("eas")
-
-	// log.Println(res)
-
-	// return nil
 
 	// check for node identity file first
 	key := &keystore.Key{}
@@ -89,7 +83,7 @@ func entry(ctx *cli.Context) error {
 	ks := keystore.NewKeyStore(cfg.Global.KeystoreDir)
 
 	listenString := "/ip4/" + cfg.P2P.ListenAddress + "/tcp/" + strconv.Itoa(cfg.P2P.ListenPort)
-	node, err := npkg.NewNode(ctx2, listenString, key, ks)
+	node, err := npkg.NewNode(ctx2, listenString, key, ks, searchEngine)
 	if err != nil {
 		return err
 	}
