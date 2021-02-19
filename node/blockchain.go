@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/ptypes"
+	"github.com/microcosm-cc/bluemonday"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/boltdb/bolt"
@@ -122,7 +123,6 @@ func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []Transaction
 			if total > 10 {
 				break
 			}
-
 		}
 
 		if total > 10 {
@@ -318,6 +318,10 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 					return err
 				}
 
+				p := bluemonday.NewPolicy()
+				p.AllowElements("h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "p", "a", "ul", "ol", "nl", "li", "b", "i", "strong", "em", "strike", "code", "hr", "br", "div", "table", "thead", "caption", "tbody", "tr", "th", "td", "pre")
+				chaNode.Description = p.Sanitize(chaNode.Description)
+
 				// NodeHash := channel name + tx from + cha desc + tx hash
 				data := bytes.Join(
 					[][]byte{
@@ -476,7 +480,8 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 					// if channel then update the channels bucket
 					if chaNode.NodeType == ChanNodeType_CHANNEL {
 						chBucket := tx.Bucket([]byte(channelBucket))
-						err := chBucket.Put([]byte(chaNode.Hash), []byte(""))
+						id, _ := chBucket.NextSequence()
+						err := chBucket.Put(common.Itob(id), []byte(chaNode.Hash))
 						if err != nil {
 							return err
 						}

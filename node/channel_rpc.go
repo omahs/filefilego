@@ -40,7 +40,7 @@ func (api *ChannelAPI) List(ctx context.Context, limit int, offset int) (ChanNod
 		c := b.Cursor()
 		index := 0
 		accepted := 0
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, val := c.First(); k != nil; k, val = c.Next() {
 			index++
 			if limit == accepted {
 				break
@@ -49,7 +49,7 @@ func (api *ChannelAPI) List(ctx context.Context, limit int, offset int) (ChanNod
 				continue
 			}
 
-			v := nbucket.Get(k)
+			v := nbucket.Get(val)
 			channel := ChanNode{}
 			proto.Unmarshal(v, &channel)
 			pl.Channels = append(pl.Channels, channel)
@@ -128,11 +128,11 @@ func (api *ChannelAPI) GetNode(ctx context.Context, hash string) (response ChanN
 }
 
 // Search uses fulltext search for name and description
-func (api *ChannelAPI) Search(ctx context.Context, query string, limit int) (response []ChanNode, err error) {
+func (api *ChannelAPI) Search(ctx context.Context, query string, searchType int, limit int) (response []ChanNode, err error) {
 	if limit > api.Node.SearchEngine.MaxSearchDocumentsPerQuery {
 		limit = api.Node.SearchEngine.MaxSearchDocumentsPerQuery
 	}
-	res, err := api.Node.SearchEngine.Search(query)
+	res, err := api.Node.SearchEngine.Search(query, searchType)
 	if err != nil {
 		return response, err
 	}

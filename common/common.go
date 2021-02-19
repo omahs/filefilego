@@ -1,6 +1,9 @@
 package common
 
-import "os"
+import (
+	"encoding/binary"
+	"os"
+)
 
 // FileExists checks if destination file exists
 func FileExists(filename string) bool {
@@ -9,6 +12,13 @@ func FileExists(filename string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// Itob returns an 8-byte big endian representation of v.
+func Itob(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, uint64(v))
+	return b
 }
 
 // I32tob convers unit32 to byte array

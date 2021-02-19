@@ -26,6 +26,7 @@ require (
 	github.com/libp2p/go-libp2p-secio v0.2.2
 	github.com/libp2p/go-libp2p-tls v0.1.3
 	github.com/libp2p/go-libp2p-yamux v0.2.7
+	github.com/microcosm-cc/bluemonday v1.0.4
 	github.com/multiformats/go-multiaddr v0.2.1
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/pborman/uuid v1.2.0
