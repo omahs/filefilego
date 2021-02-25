@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/ptypes"
 	"github.com/microcosm-cc/bluemonday"
 	log "github.com/sirupsen/logrus"
 
@@ -93,6 +92,7 @@ func (bc *Blockchain) GetHeight() uint64 {
 func (bc *Blockchain) GetTransactionByHash(hash string) (tx Transaction, blck Block, index uint64, err error) {
 	bci := bc.Iterator()
 	index = bc.GetHeight()
+
 	for {
 		block := bci.Next()
 		for _, t := range block.Transactions {
@@ -309,209 +309,276 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 
 	// for each TransactionDataPayloadType do the appropriate unmarshalling
 	if originHex != afterUnmarshalHex {
+
+		txVal, err1 := hexutil.DecodeBig(t.Value)
+		if err1 != nil {
+			return err1
+		}
+
 		switch ap.Type {
 		case TransactionDataPayloadType_CREATE_NODE:
 			{
-				// unmarshal the payload
-				chaNode := ChanNode{}
-				if err := proto.Unmarshal(ap.Payload, &chaNode); err != nil {
-					return err
-				}
-
-				p := bluemonday.NewPolicy()
-				p.AllowElements("h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "p", "a", "ul", "ol", "nl", "li", "b", "i", "strong", "em", "strike", "code", "hr", "br", "div", "table", "thead", "caption", "tbody", "tr", "th", "td", "pre")
-				chaNode.Description = p.Sanitize(chaNode.Description)
-
-				// NodeHash := channel name + tx from + cha desc + tx hash
-				data := bytes.Join(
-					[][]byte{
-						[]byte(chaNode.Name),
-						[]byte(chaNode.Size),
-						[]byte(t.From),
-						[]byte(chaNode.ParentHash),
-						[]byte(chaNode.Description),
-						[]byte(chaNode.ContentType),
-						t.Hash,
-					},
-					[]byte{},
-				)
-
-				chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
-				chaNode.Owner = t.From
-				chaNode.Timestamp = ptypes.TimestampNow()
-
-				// if channel remove parent as a security measure
-				if chaNode.NodeType == ChanNodeType_CHANNEL {
-					chaNode.ParentHash = ""
-					chaNode.Size = ""
-					chaNode.ContentType = ""
-				}
-
-				if chaNode.NodeType == ChanNodeType_OTHER || chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE || chaNode.NodeType == ChanNodeType_ENTRY || chaNode.NodeType == ChanNodeType_SUBCHANNEL {
-					// check if parent hash exists and correct permissions:
-					// 1. If its admin or
-					if chaNode.ParentHash == "" {
-						return errors.New("ParentHash not specified")
-					}
-
-					// check if parent hash is available
-					err := bc.db.View(func(tx *bolt.Tx) error {
-						b := tx.Bucket([]byte(nodesBucket))
-						exists := b.Get([]byte(chaNode.ParentHash))
-						if exists == nil {
-							return errors.New("ParentHash Node is not in the blockchain")
-						}
-
-						return nil
-					})
-					if err != nil {
-						return err
-					}
-
-					// go back to the root and find the permissions
-					cni := bc.ChanNodeIterator([]byte(chaNode.ParentHash))
-					nodesIndex := uint64(0)
-					for {
-						parentNode := cni.Next()
-						nodesIndex++
-
-						// apply structure constrains here
-						if nodesIndex == 1 {
-							if chaNode.NodeType == ChanNodeType_SUBCHANNEL {
-								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
-									return errors.New("SUBCHANNEL allowed only in channels and other subchnnels")
-								}
-							}
-
-							if chaNode.NodeType == ChanNodeType_ENTRY {
-								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
-									return errors.New("ENTRY allowed only in channels and other subchnnels")
-								}
-							}
-
-							if chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE {
-								if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL || parentNode.NodeType == ChanNodeType_ENTRY) {
-									return errors.New("DIR/FILE allowed only in channels, subchnnels and entries")
-								}
-							}
-
-							if chaNode.NodeType == ChanNodeType_OTHER {
-								if parentNode.NodeType != ChanNodeType_ENTRY {
-									return errors.New("OTHER allowed only in entry")
-								}
-							}
-						}
-
-						if parentNode.ParentHash == "" {
-							hasPermission, isPoster, isGuest := false, false, false
-
-							// if an admin
-							if parentNode.Owner == t.From {
-								hasPermission = true
-							}
-
-							// if in admins
-							for _, v := range parentNode.Admins {
-								if v == t.From {
-									hasPermission = true
-									break
-								}
-							}
-
-							// if in posters or wildcard * is applied then allow as poster
-							for _, v := range parentNode.Posters {
-								if v == t.From {
-									hasPermission = true
-									isPoster = true
-									break
-								} else if v == "*" {
-									hasPermission = true
-									isPoster = true
-								}
-							}
-
-							// if nodetype is OTHER (could be comment)
-							if chaNode.NodeType == ChanNodeType_OTHER && !hasPermission {
-								hasPermission = true
-								isGuest = true
-							}
-
-							// if poster, then allow only to add ENTRY and DIR and FILE and OTHER
-							if isPoster && chaNode.NodeType == ChanNodeType_SUBCHANNEL {
-								return errors.New("Poster can not create channel and subchannel")
-							}
-
-							if !hasPermission {
-								return errors.New("No permission to create node")
-							}
-
-							// if its a guest who posting OTHER type of nodes which might be a comment then apply fees
-							if isGuest && isMiningMode {
-								// apply fees
-								currentBalance, ok := vbalances[t.From]
-								if !ok {
-									log.Fatal("couldn't get the balance of address. This shouldn't have happened")
-								}
-								var commentFees, _ = new(big.Int).SetString(GetBlockchainSettings().NodeCreationFeesGuest, 10)
-								if currentBalance.Cmp(commentFees) < 0 {
-									return errors.New("No enough balance to post")
-								}
-							}
-
-							break
-						}
-					}
-				}
-
-				blkBts, _ := proto.Marshal(&chaNode)
-
-				err := bc.db.Update(func(tx *bolt.Tx) error {
-					b := tx.Bucket([]byte(nodesBucket))
-					exists := b.Get([]byte(chaNode.Hash))
-					if exists != nil {
-						return errors.New("Node hash already exists in the blockchain")
-					}
-
-					err := b.Put([]byte(chaNode.Hash), blkBts)
-					if err != nil {
-						return err
-					}
-
-					// if channel then update the channels bucket
-					if chaNode.NodeType == ChanNodeType_CHANNEL {
-						chBucket := tx.Bucket([]byte(channelBucket))
-						id, _ := chBucket.NextSequence()
-						err := chBucket.Put(common.Itob(id), []byte(chaNode.Hash))
-						if err != nil {
-							return err
-						}
-					} else {
-						// add relations by using the intermidiate bucket
-						chBucket := tx.Bucket([]byte(nodeNodesBucket))
-						key := bytes.Join([][]byte{
-							[]byte(chaNode.ParentHash),
-							[]byte(chaNode.Hash),
-						}, []byte{})
-						err := chBucket.Put(key, []byte(chaNode.Hash))
-						if err != nil {
-							return err
-						}
-					}
-
-					// index fulltext
-					if bc.Node.SearchEngine.Enabled && chaNode.NodeType != ChanNodeType_OTHER {
-						indexItem := search.IndexItem{Hash: chaNode.Hash, Type: int32(chaNode.NodeType), Name: chaNode.Name, Description: chaNode.Description}
-						bc.Node.SearchEngine.IndexItem(indexItem)
-					}
-
-					return nil
-				})
-
+				chEnvs := ChanNodeEnvelop{}
+				err := proto.Unmarshal(ap.Payload, &chEnvs)
 				if err != nil {
 					return err
 				}
 
-				log.Println("Created a channel")
+				for _, chaNode := range chEnvs.Nodes {
+					// unmarshal the payload
+
+					p := bluemonday.NewPolicy()
+					p.AllowElements("h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "p", "a", "ul", "ol", "nl", "li", "b", "i", "strong", "em", "strike", "code", "hr", "br", "div", "table", "thead", "caption", "tbody", "tr", "th", "td", "pre", "style")
+					chaNode.Description = p.Sanitize(chaNode.Description)
+
+					chaNode.Owner = t.From
+					chaNode.Timestamp = time.Now().Unix()
+
+					// if channel remove parent as a security measure
+					if chaNode.NodeType == ChanNodeType_CHANNEL {
+						var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
+						if txVal.Cmp(regFee) < 0 {
+							continue
+						}
+
+						txVal = txVal.Sub(txVal, regFee)
+
+						currentBalance, ok := vbalances[t.From]
+						if !ok {
+							log.Error("couldn't get the balance of address. This shouldn't have happened")
+							continue
+						}
+
+						remainingBalance := currentBalance.Sub(currentBalance, regFee)
+						vbalances[t.From] = remainingBalance
+
+						data := bytes.Join(
+							[][]byte{
+								[]byte(t.From),
+								[]byte(chaNode.Name),
+							},
+							[]byte{},
+						)
+
+						chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
+						chaNode.ParentHash = ""
+						chaNode.Size = ""
+						chaNode.ContentType = ""
+					}
+
+					if chaNode.NodeType == ChanNodeType_OTHER || chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE || chaNode.NodeType == ChanNodeType_ENTRY || chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+						// check if parent hash exists and correct permissions:
+						// 1. If its admin or
+						if chaNode.ParentHash == "" {
+							log.Error("ParentHash not specified")
+							continue
+						}
+
+						data := bytes.Join(
+							[][]byte{
+								[]byte(chaNode.ParentHash),
+								[]byte(chaNode.Name),
+							},
+							[]byte{},
+						)
+
+						chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
+
+						// check if parent hash is available
+						err := bc.db.View(func(tx *bolt.Tx) error {
+							b := tx.Bucket([]byte(nodesBucket))
+							exists := b.Get([]byte(chaNode.ParentHash))
+							if exists == nil {
+								return errors.New("ParentHash Node is not in the blockchain")
+							}
+
+							return nil
+						})
+						if err != nil {
+							log.Error(err)
+							continue
+						}
+
+						// go back to the root and find the permissions
+						cni := bc.ChanNodeIterator([]byte(chaNode.ParentHash))
+						nodesIndex := uint64(0)
+						breakOuter := false
+						for {
+							parentNode := cni.Next()
+							nodesIndex++
+
+							// apply structure constrains here
+							if nodesIndex == 1 {
+								if chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+										log.Error("SUBCHANNEL allowed only in channels and other subchnnels")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_ENTRY {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+										log.Error("ENTRY allowed only in channels and other subchnnels")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL || parentNode.NodeType == ChanNodeType_ENTRY || parentNode.NodeType == ChanNodeType_DIR) {
+										log.Error("DIR/FILE allowed only in channels, subchnnels, dirs and entries")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_OTHER {
+									if parentNode.NodeType != ChanNodeType_ENTRY {
+										log.Error("OTHER allowed only in entry")
+										breakOuter = true
+										break
+									}
+								}
+							}
+
+							// if we reached root node
+							if parentNode.ParentHash == "" {
+								hasPermission, isPoster, isGuest := false, false, false
+
+								// if an admin
+								if parentNode.Owner == t.From {
+									hasPermission = true
+								}
+
+								// if in admins
+								for _, v := range parentNode.Admins {
+									if v == t.From {
+										hasPermission = true
+										break
+									}
+								}
+
+								// if in posters or wildcard * is applied then allow as poster
+								for _, v := range parentNode.Posters {
+									if v == t.From {
+										hasPermission = true
+										isPoster = true
+										break
+									} else if v == "*" {
+										hasPermission = true
+										isPoster = true
+									}
+								}
+
+								// if nodetype is OTHER (could be comment)
+								if chaNode.NodeType == ChanNodeType_OTHER && !hasPermission {
+									hasPermission = true
+									isGuest = true
+								}
+
+								// if poster, then allow only to add ENTRY and DIR and FILE and OTHER
+								if isPoster && chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+									log.Error("Poster can not create channel and subchannel")
+									breakOuter = true
+									break
+								}
+
+								if !hasPermission {
+									log.Error("No permission to create node")
+									breakOuter = true
+									break
+								}
+
+								// if its a guest who posting OTHER type of nodes which might be a comment then apply fees
+								if isGuest && isMiningMode {
+									// apply fees
+									currentBalance, ok := vbalances[t.From]
+									if !ok {
+										log.Error("couldn't get the balance of address. This shouldn't have happened")
+										breakOuter = true
+										break
+									}
+									var commentFees, _ = new(big.Int).SetString(GetBlockchainSettings().NodeCreationFeesGuest, 10)
+									if currentBalance.Cmp(commentFees) < 0 {
+										log.Error("No enough balance to post")
+										breakOuter = true
+										break
+									}
+
+									if txVal.Cmp(commentFees) < 0 {
+										log.Error("No enough balance to post")
+										breakOuter = true
+										break
+									}
+
+									// update the runtime addresses balance
+									remainingBalance := currentBalance.Sub(currentBalance, commentFees)
+									txVal = txVal.Sub(txVal, commentFees)
+									vbalances[t.From] = remainingBalance
+
+								}
+								break
+							}
+						}
+
+						if breakOuter {
+							continue
+						}
+
+					}
+
+					blkBts, _ := proto.Marshal(chaNode)
+
+					err := bc.db.Update(func(tx *bolt.Tx) error {
+						b := tx.Bucket([]byte(nodesBucket))
+						exists := b.Get([]byte(chaNode.Hash))
+						if exists != nil {
+							return errors.New("Node hash already exists in the blockchain")
+						}
+
+						err := b.Put([]byte(chaNode.Hash), blkBts)
+						if err != nil {
+							return err
+						}
+
+						// if channel then update the channels bucket
+						if chaNode.NodeType == ChanNodeType_CHANNEL {
+							chBucket := tx.Bucket([]byte(channelBucket))
+							id, _ := chBucket.NextSequence()
+							err := chBucket.Put(common.Itob(id), []byte(chaNode.Hash))
+							if err != nil {
+								return err
+							}
+						} else {
+							// add relations by using the intermidiate bucket
+							chBucket := tx.Bucket([]byte(nodeNodesBucket))
+							key := bytes.Join([][]byte{
+								[]byte(chaNode.ParentHash),
+								[]byte(chaNode.Hash),
+							}, []byte{})
+							err := chBucket.Put(key, []byte(chaNode.Hash))
+							if err != nil {
+								return err
+							}
+						}
+
+						// index fulltext
+						if bc.Node.SearchEngine.Enabled && chaNode.NodeType != ChanNodeType_OTHER {
+							indexItem := search.IndexItem{Hash: chaNode.Hash, Type: int32(chaNode.NodeType), Name: chaNode.Name, Description: chaNode.Description}
+							bc.Node.SearchEngine.IndexItem(indexItem)
+						}
+
+						return nil
+					})
+
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+
+					log.Println("Node created within the blockchain, type: ", chaNode.NodeType)
+				}
 			}
 		case TransactionDataPayloadType_UPDATE_NODE:
 			{

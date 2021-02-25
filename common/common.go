@@ -1,9 +1,47 @@
 package common
 
 import (
+	"crypto/sha1"
 	"encoding/binary"
+	"io"
 	"os"
+
+	"github.com/filefilego/filefilego/common/hexutil"
 )
+
+// FileSize gets the file size
+func FileSize(fullPath string) (int64, error) {
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
+}
+
+// Sha1File performs a sha1 hash on a file
+func Sha1File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha1.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	return hexutil.EncodeNoPrefix(h.Sum(nil)), nil
+}
+
+// DirExists checks if destination dir exists
+func DirExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return info.IsDir()
+}
 
 // FileExists checks if destination file exists
 func FileExists(filename string) bool {

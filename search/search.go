@@ -82,14 +82,15 @@ func PrepareIndexingText(name string) string {
 
 // IndexItem indexes an item
 func (s *SearchEngine) IndexItem(item IndexItem) {
-	item.Name = PrepareIndexingText(item.Name)
+	item.Name = strings.ToLower(PrepareIndexingText(item.Name))
 	p := bluemonday.NewPolicy()
-	item.Description = p.Sanitize(item.Description)
+	item.Description = strings.ToLower(p.Sanitize(item.Description))
 	s.Index.Index(item.Hash, item)
 }
 
 // Search searches the index
 func (s *SearchEngine) Search(searchcString string, searchType int) (*bleve.SearchResult, error) {
+	searchcString = strings.ToLower(searchcString)
 	terms := strings.Split(strings.TrimSpace(searchcString), " ")
 	cleanTerms := []string{}
 	finalTerms := []string{}

@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -16,7 +20,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	proto "google.golang.org/protobuf/proto"
 
+	"github.com/filefilego/filefilego/binlayer"
+	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/crypto"
 	"github.com/filefilego/filefilego/keystore"
 	brpc "github.com/filefilego/filefilego/rpc"
 	"github.com/filefilego/filefilego/search"
@@ -62,12 +69,14 @@ type Node struct {
 	isSyncing        bool
 	IsSyncingMux     *sync.Mutex
 	SearchEngine     *search.SearchEngine
+	BinLayerEngine   *binlayer.Engine
 }
 
-func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine) (Node, error) {
+func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine, bl *binlayer.Engine) (Node, error) {
 	node := Node{
-		IsSyncingMux: &sync.Mutex{},
-		SearchEngine: se,
+		IsSyncingMux:   &sync.Mutex{},
+		SearchEngine:   se,
+		BinLayerEngine: bl,
 	}
 	host, err := libp2p.New(ctx,
 		libp2p.Identity(key.Private),
@@ -349,6 +358,179 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/", brpc.ServeHTTP(apis))
+	if n.BinLayerEngine.Enabled {
+		serveMux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+			if r.Method == "OPTIONS" {
+				return
+			}
+
+			if r.Method == "POST" {
+				authToken := r.Header.Get("Authorization")
+				can, accessType, err := n.BinLayerEngine.Can(authToken)
+				if !can {
+					w.WriteHeader(http.StatusForbidden)
+					w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+					return
+				}
+
+				if accessType != "admin" {
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(`{"error": "not authorized to perform this operation"}`))
+					return
+				}
+
+				tokenbts, err := crypto.RandomEntropy(60)
+				token := hexutil.Encode(tokenbts)
+				err = n.BinLayerEngine.InsertToken(token, "user")
+				if err != nil {
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+					return
+				}
+
+				w.Write([]byte(`{"token": "` + token + `"}`))
+
+			} else {
+				w.Write([]byte(`{"error": "method not available"}`))
+			}
+		})
+
+		serveMux.HandleFunc("/uploads", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+			if r.Method == "OPTIONS" {
+				return
+			}
+
+			authToken := r.Header.Get("Authorization")
+			can, _, err := n.BinLayerEngine.Can(authToken)
+			if !can {
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+				return
+			}
+
+			reader, _ := r.MultipartReader()
+			folderPath, _ := n.BinLayerEngine.MakeFolderPartitions()
+
+			nodeHash := ""
+			tmpFileHex := ""
+			for {
+				part, err := reader.NextPart()
+				if err == io.EOF {
+					// Done reading body
+					break
+				}
+
+				formName := part.FormName()
+				if formName == "node_hash" {
+					txtData, _ := ioutil.ReadAll(part)
+					nodeHash = string(txtData)
+					continue
+				}
+
+				if formName == "file" {
+					tmpFileName, err := crypto.RandomEntropy(40)
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						w.Write([]byte(`{"error": "Unable to create random file"}`))
+						return
+					}
+					tmpFileHex = hexutil.Encode(tmpFileName)
+
+					destFile, err := os.Create(path.Join(folderPath, tmpFileHex))
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						w.Write([]byte(`{"error": "Unable to open file on the system"}`))
+						return
+					}
+					_, err = io.Copy(destFile, part)
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						w.Write([]byte(`{"error": "Unable to copy from multipart reader"}`))
+						return
+					}
+				}
+				// part.Close()
+			}
+
+			// rename the file to: nodeHash
+			// hash the file and pute the metadata in binlayer
+			// fHash, err := common.Sha1File(path.Join(folderPath, tmpFileHex))
+			old := path.Join(folderPath, tmpFileHex)
+			fileSize, err := common.FileSize(old)
+			if err != nil {
+				// delete the file
+				os.Remove(old)
+
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "Unable to get file's size"}`))
+				return
+			}
+			newPath := path.Join(folderPath, nodeHash)
+			err = os.Rename(old, newPath)
+			if err != nil {
+
+				// delete the file
+				os.Remove(old)
+
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "Unable to rename file to node hash"}`))
+				return
+			}
+
+			fHash, err := common.Sha1File(newPath)
+			if err != nil {
+
+				// delete the file
+				os.Remove(newPath)
+
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "Unable to hash contents of file"}`))
+				return
+			}
+
+			bitem := BinlayerBinaryItem{
+				BinaryHash: fHash,
+				FilePath:   folderPath,
+				Size:       fileSize,
+			}
+
+			fileHashExistsInDb, bitemLocation := n.BinLayerEngine.FileHashExists(fHash)
+			if fileHashExistsInDb {
+				// delete the current file
+				os.Remove(newPath)
+
+				availableBitem, _ := n.BinLayerEngine.GetBinaryItem(bitemLocation)
+				proto.Unmarshal(availableBitem, &bitem)
+
+			}
+
+			mbits, err := proto.Marshal(&bitem)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+				return
+			}
+
+			err = n.BinLayerEngine.InsertBinaryItem(nodeHash, mbits, bitem.BinaryHash, fileHashExistsInDb)
+			if err != nil {
+				// delete the file
+				os.Remove(newPath)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+				return
+			}
+
+			w.Write([]byte(fmt.Sprintf(`{"file_hash": "%s", "size": %d}`, fHash, bitem.Size)))
+		})
+	}
 	handler := cors.AllowAll().Handler(serveMux)
 	httpAddr := fmt.Sprintf("%s:%d", address, port)
 	log.Fatal(http.ListenAndServe(httpAddr, handler))

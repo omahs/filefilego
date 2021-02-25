@@ -19,7 +19,7 @@ Structure constraints:
 1. `CHANNEL` can not be nested in any other types
 2. `SUBCHANNEL` can be within a `CHANNEL` or `SUBCHANNEL` only
 3. `ENTRY` can be within `CHANNEL` or `SUBCHANNEL`
-4. `DIR and FILE` can be within all of the above
+4. `DIR and FILE` can be within only ENTRY
 5. `OTHER` can be within an `ENTRY` ONLY
 
 #### Visual Utilities
@@ -42,11 +42,17 @@ We decide to use a set of buckets to organize the data within the boltdb file. W
 6. `node_nodes` represents the relationships between nodes. Since boltdb keys are sorted (indexed) we utilize this feature to have keys of type: `ParentHash+Hash` so we can have fater lookups.
 
 
-## Protobuf
+### Binlayer
+
+#### Binlayer database index
+
+Binary metadata location and hashes are stored within a boltdb database which is offchain. The only problem (we have already solved) with this approach is that when a binlayer operator moves the data from one node to another, they must make sure to copy this database file too. However we can still extract the structure from the filesystem itself, using the actual filesystem names which represent the onchain node hash, and by hashing the content of the file we get the rest of the information needed to restore the database.
+
+### Protobuf
 
 Protobuf related notes
 
-### Protoc compiler
+#### Protoc compiler
 
 Download and install using the following commands:
 
@@ -59,7 +65,7 @@ sudo chown $USER /usr/local/bin/protoc
 protoc
 ```
 
-### Protobuf message compilation for Golang
+#### Protobuf message compilation for Golang
 
 Installation:
 
@@ -74,7 +80,7 @@ Compile to go:
 protoc --go_out=. *.proto
 ```
 
-### Protobuf message compilation for Javascript
+#### Protobuf message compilation for Javascript
 
 ```
 cd filefilego

@@ -12,6 +12,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/filefilego/filefilego/binlayer"
 	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/keystore"
@@ -41,6 +42,15 @@ func init() {
 
 func entry(ctx *cli.Context) error {
 	cfg := GetConfig(ctx)
+	bn := binlayer.Engine{}
+
+	if cfg.Global.BinLayer {
+		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken)
+		bn.Enabled = true
+		log.Println("Binlayer storage is enabled")
+	} else {
+		log.Println("Binlayer storage is disabled")
+	}
 
 	searchEngine := &search.SearchEngine{}
 	if cfg.Global.FullText {
@@ -83,7 +93,7 @@ func entry(ctx *cli.Context) error {
 	ks := keystore.NewKeyStore(cfg.Global.KeystoreDir)
 
 	listenString := "/ip4/" + cfg.P2P.ListenAddress + "/tcp/" + strconv.Itoa(cfg.P2P.ListenPort)
-	node, err := npkg.NewNode(ctx2, listenString, key, ks, searchEngine)
+	node, err := npkg.NewNode(ctx2, listenString, key, ks, searchEngine, &bn)
 	if err != nil {
 		return err
 	}

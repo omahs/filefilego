@@ -9,6 +9,9 @@ type Global struct {
 	MinePass            string
 	FullText            bool
 	FullTextResultCount int
+	BinLayer            bool
+	BinLayerDir         string
+	BinLayerToken       string
 }
 
 // Host

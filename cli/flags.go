@@ -49,6 +49,21 @@ var (
 		Usage: "Max number of documents per search query",
 	}
 
+	BinLayer = cli.BoolFlag{
+		Name:  "binlayer",
+		Usage: "Enable binlayer storage",
+	}
+
+	BinLayerDir = cli.StringFlag{
+		Name:  "binlayerdir",
+		Usage: "Storage location for binlayer",
+	}
+
+	BinLayerToken = cli.StringFlag{
+		Name:  "binlayer_token",
+		Usage: "Access token for binlayer",
+	}
+
 	RPCFlag = cli.BoolFlag{
 		Name:  "rpc",
 		Usage: "Enable JSON-RPC protocol",
@@ -164,6 +179,9 @@ var AppFlags = []cli.Flag{
 	MinePass,
 	FullText,
 	FullTextResultCount,
+	BinLayer,
+	BinLayerDir,
+	BinLayerToken,
 
 	RPCFlag,
 	RPCServicesFlag,
