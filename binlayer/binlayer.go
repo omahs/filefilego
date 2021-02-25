@@ -53,8 +53,6 @@ func createDirectory(path string) error {
 // NewEngine returns an instance of engine
 func NewEngine(path string, dataDir string, token string) (Engine, error) {
 
-	log.Println(token)
-
 	filePath := dataDir + "/db/binlayer.db"
 	if !common.FileExists(filePath) {
 		os.MkdirAll(dataDir+"/db/", os.ModePerm)
@@ -92,10 +90,9 @@ func (n *Engine) MakeFolderPartitions() (string, error) {
 	folder := fmt.Sprintf("%d-%02d-%02d", currentTime.Year(), currentTime.Month(), currentTime.Day())
 
 	destinationPath := path.Join(n.Path, folder)
-	if !common.DirExists(destinationPath) {
-		err := createDirectory(destinationPath)
-		return "", err
-	}
+
+	createDirectory(destinationPath)
+
 	return destinationPath, nil
 }
 

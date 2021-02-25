@@ -463,22 +463,33 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 			// rename the file to: nodeHash
 			// hash the file and pute the metadata in binlayer
 			// fHash, err := common.Sha1File(path.Join(folderPath, tmpFileHex))
-			err = os.Rename(path.Join(folderPath, tmpFileHex), path.Join(folderPath, nodeHash))
+			old := path.Join(folderPath, tmpFileHex)
+			fileSize, err := common.FileSize(old)
+			if err != nil {
+				// delete the file
+				os.Remove(old)
+
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "Unable to get file's size"}`))
+				return
+			}
+			newPath := path.Join(folderPath, nodeHash)
+			err = os.Rename(old, newPath)
 			if err != nil {
 
 				// delete the file
-				os.Remove(path.Join(folderPath, tmpFileHex))
+				os.Remove(old)
 
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(`{"error": "Unable to rename file to node hash"}`))
 				return
 			}
 
-			fHash, err := common.Sha1File(path.Join(folderPath, nodeHash))
+			fHash, err := common.Sha1File(newPath)
 			if err != nil {
 
 				// delete the file
-				os.Remove(path.Join(folderPath, nodeHash))
+				os.Remove(newPath)
 
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(`{"error": "Unable to hash contents of file"}`))
@@ -488,12 +499,13 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 			bitem := BinlayerBinaryItem{
 				BinaryHash: fHash,
 				FilePath:   folderPath,
+				Size:       fileSize,
 			}
 
 			fileHashExistsInDb, bitemLocation := n.BinLayerEngine.FileHashExists(fHash)
 			if fileHashExistsInDb {
 				// delete the current file
-				os.Remove(path.Join(folderPath, nodeHash))
+				os.Remove(newPath)
 
 				availableBitem, _ := n.BinLayerEngine.GetBinaryItem(bitemLocation)
 				proto.Unmarshal(availableBitem, &bitem)
@@ -510,13 +522,13 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 			err = n.BinLayerEngine.InsertBinaryItem(nodeHash, mbits, bitem.BinaryHash, fileHashExistsInDb)
 			if err != nil {
 				// delete the file
-				os.Remove(path.Join(folderPath, nodeHash))
+				os.Remove(newPath)
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(`{"error": "` + err.Error() + `"}`))
 				return
 			}
 
-			w.Write([]byte(`{"file_hash": "` + fHash + `"}`))
+			w.Write([]byte(fmt.Sprintf(`{"file_hash": "%s", "size": %d}`, fHash, bitem.Size)))
 		})
 	}
 	handler := cors.AllowAll().Handler(serveMux)

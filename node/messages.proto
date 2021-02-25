@@ -75,6 +75,7 @@ message ChanNode {
 message BinlayerBinaryItem {
     string BinaryHash = 1;
     string FilePath = 2;
+    int64 Size = 3;
 }
 
 message GossipPayload {

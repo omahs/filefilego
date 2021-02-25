@@ -9,6 +9,15 @@ import (
 	"github.com/filefilego/filefilego/common/hexutil"
 )
 
+// FileSize gets the file size
+func FileSize(fullPath string) (int64, error) {
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
+}
+
 // Sha1File performs a sha1 hash on a file
 func Sha1File(path string) (string, error) {
 	f, err := os.Open(path)
