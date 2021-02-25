@@ -38,27 +38,43 @@ func IsValidChannelPayload(t Transaction, currentBalance *big.Int) bool {
 		}
 	}
 
+	txVal, err1 := hexutil.DecodeBig(t.Value)
+	if err1 != nil {
+		log.Warn(err1)
+		return false
+	}
+
 	//  if registering a channel: check for enough balance and
 	if originHex != afterUnmarshalHex && ap.Type == TransactionDataPayloadType_CREATE_NODE {
 
-		chaNode := ChanNode{}
-		err := proto.Unmarshal(ap.Payload, &chaNode)
+		chEnvs := ChanNodeEnvelop{}
+		err := proto.Unmarshal(ap.Payload, &chEnvs)
 		if err != nil {
 			return false
 		}
+		var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
+		var totalBalanceRequired, _ = new(big.Int).SetString("0", 10)
+		for _, chaNode := range chEnvs.Nodes {
+			// if channel, MUST have no parent hash, and enough balance
 
-		// if channel, MUST have no parent hash, and enough balance
-		if chaNode.NodeType == ChanNodeType_CHANNEL {
-			if chaNode.ParentHash != "" {
-				return false
-			}
-
-			var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
-			if currentBalance.Cmp(regFee) < 0 {
-				log.Warn("not much balance for namespace registration: ", chaNode.Name, " desc: ", chaNode.Description)
-				return false
+			if chaNode.NodeType == ChanNodeType_CHANNEL {
+				if chaNode.ParentHash != "" {
+					return false
+				}
+				totalBalanceRequired = totalBalanceRequired.Add(totalBalanceRequired, regFee)
 			}
 		}
+
+		if currentBalance.Cmp(totalBalanceRequired) < 0 {
+			log.Warn("not much balance for namespace registration")
+			return false
+		}
+
+		if txVal.Cmp(totalBalanceRequired) < 0 {
+			log.Warn("not enough amount in tx.Value")
+			return false
+		}
+
 	}
 
 	return true

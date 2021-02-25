@@ -1,7 +1,6 @@
 syntax="proto3";
 package node;
 
-import "google/protobuf/timestamp.proto"; 
 
 message AddressState {
 	bytes Balance = 1;
@@ -42,15 +41,18 @@ message TransactionDataPayload {
     bytes Payload = 2;
 }
 
-
+message ChanNodeEnvelop {
+    repeated ChanNode Nodes = 1;
+}
 
 enum ChanNodeType {
-    FILE = 0;
-    DIR = 1;
-    CHANNEL = 2;
-    SUBCHANNEL = 3;
-    ENTRY = 4;
-    OTHER = 5;
+    INVALIDNODE = 0;
+    FILE = 1;
+    DIR = 2;
+    CHANNEL = 3;
+    SUBCHANNEL = 4;
+    ENTRY = 5;
+    OTHER = 6;
 }
 
 message ChanNode {
@@ -67,7 +69,12 @@ message ChanNode {
     repeated string Attributes = 11;
     repeated string Admins = 12;
     repeated string Posters = 13;
-    google.protobuf.Timestamp Timestamp = 14;
+    int64 Timestamp = 14;
+}
+
+message BinlayerBinaryItem {
+    string BinaryHash = 1;
+    string FilePath = 2;
 }
 
 message GossipPayload {

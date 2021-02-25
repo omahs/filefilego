@@ -23,6 +23,9 @@ func DefaultConfig() *GlobalConfig {
 			MinePass:            "",
 			FullText:            false,
 			FullTextResultCount: 200,
+			BinLayer:            false,
+			BinLayerDir:         "",
+			BinLayerToken:       "",
 		},
 		Host: Host{},
 		RPC: RPC{
@@ -106,6 +109,18 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 
 	if ctx.GlobalIsSet(FullTextResultCount.Name) {
 		cfg.Global.FullTextResultCount = ctx.GlobalInt(FullTextResultCount.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayer.Name) {
+		cfg.Global.BinLayer = ctx.GlobalBool(BinLayer.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayerDir.Name) {
+		cfg.Global.BinLayerDir = ctx.GlobalString(BinLayerDir.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayerToken.Name) {
+		cfg.Global.BinLayerToken = ctx.GlobalString(BinLayerToken.Name)
 	}
 
 	// Host

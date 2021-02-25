@@ -143,6 +143,17 @@ You will get json filenames which contains the address of your created account i
 filefilego.exe --rpc --http --httpport=8090 --httpaddr=0.0.0.0 --bootstrapnodes="/ip4/77.247.178.110/tcp/10209/p2p/16Uiu2HAm1WKH57E4vku2rhLT3qMtP6GX5t5CxxoSmQnJWMHc6Lot"
 ```
 
+# Binlayer
+
+Binlayer is the storage layer which keeps track of binary files and uses hashes to represent a piece of information within the blockchain. This feature can be turned on by using the following flags:
+
+```
+... --binlayer --binlayerdir="/somewhere/to/store/data" --binlayer_token="somelongtokenhere" ...
+```
+
+`--binlayerdir` should be a directory that exists with appropriate read/write perissions. Please note that full nodes can work without this mechanism. `binlayer_token` is a token which grants admin rights to a token so it can create other tokens using the http api. This is useful when access right is needed by web apps or distinct users.
+
+
 # Architecture
 
 In this section we cover the disadvantages of different protocols and platforms to get a more clear picture and examine the weaknesses.
