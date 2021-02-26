@@ -23,13 +23,13 @@ type BlockchainSettings struct {
 // GetBlockchainSettings returns the genesis data
 func GetBlockchainSettings() BlockchainSettings {
 	gen := BlockchainSettings{
-		BlockchainVersion:  "0.5.1",
+		BlockchainVersion:  "0.9.2",
 		Chain:              hexutil.MustDecode("0x01"), // 1 for Mainnet, anything else for other chains
 		GenesisHash:        "c2005c6ea44df4800bbd56d857bb6cb727acde486869553d212056bea38438e9",
 		BlockTimeSeconds:   10,
 		InitialBlockReward: "15000000000000000000",        // 15 zarans
 		MaxSupply:          "500000000000000000000000000", // 500M zarans
-		DropRewardDays:     1095,                          //3 years
+		DropRewardDays:     730,                           //2 years
 		DropRewardFactor:   2,
 		NamespaceEnabled:   true,
 		//NamespaceRegistrationFee: "10000000000000000000000", //10k zarans
