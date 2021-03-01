@@ -66,8 +66,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (s
 		return "", err
 	}
 
-	log.Println("len rawTxSig", len(rawTxSig), hexutil.Encode(rawTxSig))
-
 	chainID, err := hexutil.Decode(parsedTx.Chain)
 	if err != nil {
 		return "", err

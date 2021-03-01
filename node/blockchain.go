@@ -341,16 +341,17 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 							continue
 						}
 
-						txVal = txVal.Sub(txVal, regFee)
+						if isMiningMode {
+							txVal = txVal.Sub(txVal, regFee)
+							currentBalance, ok := vbalances[t.From]
+							if !ok {
+								log.Error("couldn't get the balance of address. This shouldn't have happened")
+								continue
+							}
+							remainingBalance := currentBalance.Sub(currentBalance, regFee)
+							vbalances[t.From] = remainingBalance
 
-						currentBalance, ok := vbalances[t.From]
-						if !ok {
-							log.Error("couldn't get the balance of address. This shouldn't have happened")
-							continue
 						}
-
-						remainingBalance := currentBalance.Sub(currentBalance, regFee)
-						vbalances[t.From] = remainingBalance
 
 						data := bytes.Join(
 							[][]byte{
@@ -576,7 +577,6 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 						log.Error(err)
 						continue
 					}
-					log.Println("Node created within the blockchain, type: ", chaNode.NodeType)
 				}
 			}
 		case TransactionDataPayloadType_UPDATE_NODE:

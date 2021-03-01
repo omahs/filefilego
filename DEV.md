@@ -99,3 +99,16 @@ to get current timestamp:
 ```
 ptypes.TimestampNow()
 ```
+
+### Testing and Simulations
+
+There is a docker file which creates an image with the current compiled cli. Just make sure to build the image using:
+```
+docker build . -t ffg
+```
+
+and then run a container using:
+
+```
+docker run -it ffg --rpc --http --httpport=8090 --httpaddr=0.0.0.0 --bootstrapnodes="/ip4/192.168.0.10/tcp/10209/p2p/16Uiu2HAmKR42X3hxnRBQnKCGB9VfAfbg54ajhFA9MDvJtesBxrYS" --rpcservices="channel,transaction,account,block,ffg"
+```

@@ -157,7 +157,7 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		if ok {
 			err := n.BlockChain.AddMemPool(tx)
 			if err != nil {
-				log.Warn("Problem while adding tx to mempool from broadcast: ", err)
+				log.Warn(err)
 			}
 		}
 
