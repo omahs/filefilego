@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -114,7 +115,7 @@ func (ks *KeyStore) UnlockAccount(address string, passphrase string) (string, er
 
 	for _, file := range files {
 		if strings.Contains(file.Name(), address) {
-			bts, err := ioutil.ReadFile(ks.keyDir + "/" + file.Name())
+			bts, err := ioutil.ReadFile(path.Join(ks.keyDir, file.Name()))
 			if err != nil {
 				return "", err
 			}

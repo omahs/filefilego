@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"path"
 	"sort"
 	"strconv"
 	"syscall"
@@ -54,7 +55,7 @@ func entry(ctx *cli.Context) error {
 
 	searchEngine := &search.SearchEngine{}
 	if cfg.Global.FullText {
-		se, err := search.NewSearchEngine(cfg.Global.DataDir+"/"+"searchidx/db.bleve", cfg.Global.FullTextResultCount)
+		se, err := search.NewSearchEngine(path.Join(cfg.Global.DataDir, "searchidx", "db.bleve"), cfg.Global.FullTextResultCount)
 		if err != nil {
 			log.Fatal("Unable to load or create the search index", err)
 		}
