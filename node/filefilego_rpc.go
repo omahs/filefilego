@@ -50,3 +50,8 @@ func (api *FilefilegoAPI) Verifier(ctx context.Context) (string, error) {
 func (api *FilefilegoAPI) Settings(ctx context.Context) (BlockchainSettings, error) {
 	return GetBlockchainSettings(), nil
 }
+
+// PeerID returns the current node peer ID
+func (api *FilefilegoAPI) PeerID(ctx context.Context) (string, error) {
+	return api.Node.Host.ID().String(), nil
+}

@@ -268,18 +268,19 @@ func (n *Node) Advertise(ctx context.Context) {
 	discovery.Advertise(ctx, n.RoutingDiscovery, "FINDMEHERE")
 }
 
-func (n *Node) FindPeers(ctx context.Context) error {
+func (n *Node) FindPeers(ctx context.Context) (adrs []peer.AddrInfo, err error) {
 	peerChan, err := n.RoutingDiscovery.FindPeers(ctx, "FINDMEHERE")
 	if err != nil {
-		return err
+		return adrs, err
 	}
 
 	for peer := range peerChan {
 		if peer.ID == n.Host.ID() {
 			continue
 		}
+		adrs = append(adrs, peer)
 	}
-	return nil
+	return adrs, nil
 }
 
 func (n *Node) Peers() peer.IDSlice {

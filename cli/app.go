@@ -136,7 +136,7 @@ func entry(ctx *cli.Context) error {
 	}
 
 	node.Advertise(ctx2)
-	err = node.FindPeers(ctx2)
+	_, err = node.FindPeers(ctx2)
 	if err != nil {
 		log.Warn("Unable to find peers", err)
 	}
