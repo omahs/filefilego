@@ -129,6 +129,11 @@ var (
 		Usage: "WS-RPC cross-origin value",
 	}
 
+	P2PMaxGossipSize = cli.IntFlag{
+		Name:  "maxgossipsize",
+		Usage: "Maximum gossip size",
+	}
+
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of peers to connect",
@@ -196,6 +201,7 @@ var AppFlags = []cli.Flag{
 	RPCWSPortFlag,
 	RPCWSAddrFlag,
 	RPCWSCrossOriginFlag,
+	P2PMaxGossipSize,
 	MaxPeersFlag,
 	P2PListenPortFlag,
 	P2PListenAddrFlag,

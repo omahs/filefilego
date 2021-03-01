@@ -31,12 +31,13 @@ type RPC struct {
 
 // P2P
 type P2P struct {
-	MaxPeers           int
-	ListenPort         int
-	ListenAddress      string
-	ConnectionTimeout  int
-	MinPeersThreashold int
-	Bootstraper        Bootstraper
+	GossipMaxMessageSize int
+	MaxPeers             int
+	ListenPort           int
+	ListenAddress        string
+	ConnectionTimeout    int
+	MinPeersThreashold   int
+	Bootstraper          Bootstraper
 }
 
 // DomainSocket

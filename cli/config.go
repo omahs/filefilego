@@ -50,11 +50,12 @@ func DefaultConfig() *GlobalConfig {
 			},
 		},
 		P2P: P2P{
-			MaxPeers:           20,
-			ListenPort:         10209,
-			ListenAddress:      "0.0.0.0",
-			ConnectionTimeout:  40,
-			MinPeersThreashold: 2,
+			GossipMaxMessageSize: 10 * 1048576, // 10 MB
+			MaxPeers:             20,
+			ListenPort:           10209,
+			ListenAddress:        "0.0.0.0",
+			ConnectionTimeout:    40,
+			MinPeersThreashold:   2,
 			Bootstraper: Bootstraper{
 				BootstrapPeriodic: 120,
 			},
@@ -182,6 +183,11 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 	}
 
 	// P2P
+
+	if ctx.GlobalIsSet(P2PMaxGossipSize.Name) {
+		cfg.P2P.GossipMaxMessageSize = ctx.GlobalInt(P2PMaxGossipSize.Name)
+	}
+
 	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
 		cfg.P2P.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
 	}

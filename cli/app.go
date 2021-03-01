@@ -119,7 +119,7 @@ func entry(ctx *cli.Context) error {
 	// node.BlockChain.LoadToMemPoolFromDB()
 
 	// apply pubsub gossip to listen for incoming blocks and transactions
-	node.ApplyGossip(ctx2)
+	node.ApplyGossip(ctx2, cfg.P2P.GossipMaxMessageSize)
 
 	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
 

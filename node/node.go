@@ -181,11 +181,12 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 	}
 	return nil
 }
-func (n *Node) ApplyGossip(ctx context.Context) (err error) {
+func (n *Node) ApplyGossip(ctx context.Context, maxMessageSize int) (err error) {
 	n.Gossip = PubSubMetadata{}
 
 	optsPS := []pubsub.Option{
 		pubsub.WithMessageSigning(true),
+		pubsub.WithMaxMessageSize(maxMessageSize),
 	}
 
 	n.Gossip.PubSub, err = pubsub.NewGossipSub(ctx, n.Host, optsPS...)
