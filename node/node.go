@@ -528,7 +528,7 @@ func (n *Node) StartRPCHTTP(ctx context.Context, enabledServices []string, addre
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf(`{"file_hash": "%s", "size": %d}`, fHash, bitem.Size)))
+			w.Write([]byte(fmt.Sprintf(`{"file_hash": "%s", "size": %d}`, bitem.BinaryHash, bitem.Size)))
 		})
 	}
 	handler := cors.AllowAll().Handler(serveMux)

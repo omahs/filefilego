@@ -576,7 +576,6 @@ func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int
 						log.Error(err)
 						continue
 					}
-
 					log.Println("Node created within the blockchain, type: ", chaNode.NodeType)
 				}
 			}

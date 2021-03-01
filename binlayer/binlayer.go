@@ -177,7 +177,7 @@ func (n *Engine) InsertBinaryItem(nodeHash string, data []byte, fileHash string,
 		b := tx.Bucket([]byte(dataBucket))
 		node := b.Get([]byte(nodeHash))
 		if node != nil {
-			return errors.New("Node hash already exists")
+			return errors.New("node hash already exists, try to rename")
 		}
 		b.Put([]byte(nodeHash), data)
 
