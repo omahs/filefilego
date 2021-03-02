@@ -28,9 +28,10 @@ type AddressToken struct {
 
 // Engine represents the storage layer
 type Engine struct {
-	Path    string
-	Enabled bool
-	DB      *bolt.DB
+	Path      string
+	Enabled   bool
+	DB        *bolt.DB
+	FeesPerGB string
 }
 
 func createDirectory(path string) error {
@@ -51,7 +52,7 @@ func createDirectory(path string) error {
 }
 
 // NewEngine returns an instance of engine
-func NewEngine(path string, dataDir string, token string) (Engine, error) {
+func NewEngine(path string, dataDir string, token string, feesGB string) (Engine, error) {
 
 	filePath := dataDir + "/db/binlayer.db"
 	if !common.FileExists(filePath) {
@@ -70,7 +71,7 @@ func NewEngine(path string, dataDir string, token string) (Engine, error) {
 		return nil
 	})
 
-	ng := Engine{Path: path, DB: db}
+	ng := Engine{Path: path, DB: db, FeesPerGB: feesGB}
 
 	ng.InsertToken(token, "admin")
 

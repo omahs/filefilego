@@ -64,6 +64,11 @@ var (
 		Usage: "Access token for binlayer",
 	}
 
+	BinLayerFeesGB = cli.StringFlag{
+		Name:  "binlayerfeesgb",
+		Usage: "Binlayer fees (ARAN) per GB of data",
+	}
+
 	RPCFlag = cli.BoolFlag{
 		Name:  "rpc",
 		Usage: "Enable JSON-RPC protocol",
@@ -187,6 +192,7 @@ var AppFlags = []cli.Flag{
 	BinLayer,
 	BinLayerDir,
 	BinLayerToken,
+	BinLayerFeesGB,
 
 	RPCFlag,
 	RPCServicesFlag,

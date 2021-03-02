@@ -8,4 +8,4 @@ VOLUME [ "/root/.filefilego_data/" ]
 
 EXPOSE 8090
 
-ENTRYPOINT ["./filefilego"]
+# ENTRYPOINT ["./filefilego"]

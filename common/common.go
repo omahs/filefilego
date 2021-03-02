@@ -34,6 +34,13 @@ func Sha1File(path string) (string, error) {
 	return hexutil.EncodeNoPrefix(h.Sum(nil)), nil
 }
 
+// Sha1String performs a sha1 hash on a string
+func Sha1String(data string) (string, error) {
+	h := sha1.New()
+	io.WriteString(h, data)
+	return hexutil.Encode(h.Sum(nil)), nil
+}
+
 // DirExists checks if destination dir exists
 func DirExists(filename string) bool {
 	info, err := os.Stat(filename)

@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/boltdb/bolt"
+	"github.com/filefilego/filefilego/common"
 	"github.com/golang/protobuf/proto"
+	log "github.com/sirupsen/logrus"
 )
 
 // ChannelAPI represents rpc methods for the channel functionality
@@ -171,4 +175,67 @@ func (api *ChannelAPI) Search(ctx context.Context, query string, searchType int,
 	}
 
 	return response, nil
+}
+
+// DataQuery applies gossip to search for suplied nodes
+func (api *ChannelAPI) DataQuery(ctx context.Context, nodes string) (string, error) {
+
+	dataHash, err := common.Sha1String(nodes)
+
+	if err != nil {
+		return "", errors.New("Unable to hash the request")
+	}
+
+	ns := strings.Split(nodes, ",")
+	availableNodes := []string{}
+
+	err = api.Node.BlockChain.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+
+		for _, v := range ns {
+			if v == "" {
+				continue
+			}
+
+			bts := b.Get([]byte(v))
+			if bts == nil {
+				log.Warn("Node not found with given hash")
+				continue
+			}
+
+			availableNodes = append(availableNodes, v)
+		}
+
+		return nil
+	})
+
+	if len(availableNodes) == 0 {
+		return "", errors.New("at least one valid node is required")
+	}
+
+	dqr := DataQueryRequest{
+		Nodes:        availableNodes,
+		FromPeerAddr: api.Node.GetReachableAddr(),
+		Hash:         dataHash,
+		Timestamp:    time.Now().Unix(),
+	}
+
+	bts, err := proto.Marshal(&dqr)
+	if err != nil {
+		return "", err
+	}
+
+	gpl := GossipPayload{
+		Type:    GossipPayload_DATA_QUERY_REQUEST,
+		Payload: bts,
+	}
+
+	bts, err = proto.Marshal(&gpl)
+	if err != nil {
+		return "", err
+	}
+
+	api.Node.Gossip.Broadcast(bts)
+
+	return dataHash, nil
 }

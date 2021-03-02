@@ -78,10 +78,25 @@ message BinlayerBinaryItem {
     int64 Size = 3;
 }
 
+message DataQueryRequest {
+    repeated string Nodes = 1;
+    string FromPeerAddr = 2;
+    string Hash = 3;
+    int64 Timestamp = 4;
+}
+
+message DataQueryResponse {
+    repeated string UnavailableNodes = 1;
+    string FromPeerAddr = 2;
+    string TotalFeesRequired = 3;
+    int64 Timestamp = 4;
+}
+
 message GossipPayload {
     enum GossipPayloadType {
         BLOCK = 0;
         TRANSACTION = 1;
+        DATA_QUERY_REQUEST = 2;
     }
     GossipPayloadType Type = 1;
     bytes Payload = 2;

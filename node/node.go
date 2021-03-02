@@ -1,17 +1,21 @@
 package node
 
 import (
+	"bytes"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/big"
 	"net/http"
 	"os"
 	"path"
 	"sync"
 	"time"
 
+	"github.com/boltdb/bolt"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/libp2p/go-libp2p"
@@ -35,6 +39,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/rs/cors"
 )
 
@@ -59,17 +64,18 @@ func (c *PubSubMetadata) Broadcast(data []byte) error {
 
 // Node represents all the node functionalities
 type Node struct {
-	Host             host.Host
-	BlockService     *BlockService
-	DHT              *dht.IpfsDHT
-	RoutingDiscovery *discovery.RoutingDiscovery
-	Gossip           PubSubMetadata
-	Keystore         *keystore.KeyStore
-	BlockChain       *Blockchain
-	isSyncing        bool
-	IsSyncingMux     *sync.Mutex
-	SearchEngine     *search.SearchEngine
-	BinLayerEngine   *binlayer.Engine
+	Host              host.Host
+	DataQueryProtocol *DataQueryProtocol
+	BlockService      *BlockService
+	DHT               *dht.IpfsDHT
+	RoutingDiscovery  *discovery.RoutingDiscovery
+	Gossip            PubSubMetadata
+	Keystore          *keystore.KeyStore
+	BlockChain        *Blockchain
+	isSyncing         bool
+	IsSyncingMux      *sync.Mutex
+	SearchEngine      *search.SearchEngine
+	BinLayerEngine    *binlayer.Engine
 }
 
 func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine, bl *binlayer.Engine) (Node, error) {
@@ -96,6 +102,7 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 	)
+
 	if err != nil {
 		return node, err
 	}
@@ -112,6 +119,16 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 	node.Keystore = ks
 
 	return node, nil
+}
+
+// GetReachableAddr returns full add
+func (n *Node) GetReachableAddr() string {
+	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
+	for _, lid := range n.Host.Addrs() {
+		fulladdr := lid.Encapsulate(hostAddr)
+		return fulladdr.String()
+	}
+	return ""
 }
 
 // IsSyncing
@@ -178,6 +195,136 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		} else {
 			log.Warn("Got an invalid block")
 		}
+	} else if gossip.Type == GossipPayload_DATA_QUERY_REQUEST {
+		if n.Host.ID().Pretty() == msg.ReceivedFrom.Pretty() {
+			return nil
+		}
+
+		dqr := DataQueryRequest{}
+		if err := proto.Unmarshal(gossip.Payload, &dqr); err != nil {
+			log.Warn("Got an invalid DATA_QUERY_REQUEST")
+			return err
+		}
+
+		if n.BinLayerEngine.Enabled {
+
+			// find all available nodes
+			availableNodes := []ChanNode{}
+			n.BlockChain.db.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte(nodesBucket))
+
+				for _, v := range dqr.Nodes {
+					if v == "" {
+						continue
+					}
+
+					bts := b.Get([]byte(v))
+					if bts == nil {
+						continue
+					}
+					tmp := ChanNode{}
+					proto.Unmarshal(bts, &tmp)
+
+					// we accept only entries, dirs and files
+					if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR || tmp.NodeType == ChanNodeType_FILE {
+						availableNodes = append(availableNodes, tmp)
+					}
+				}
+
+				return nil
+			})
+
+			// make a queue so expansion can be performed
+			queue := list.New()
+			for _, reqNode := range availableNodes {
+				queue.PushBack(reqNode)
+			}
+
+			unavailableNodes := []string{}
+			totalSize := uint64(0)
+			totalCountItems := 0
+			err := n.BlockChain.db.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte(nodesBucket))
+				for queue.Len() > 0 {
+					el := queue.Front()
+					tmp := el.Value.(ChanNode)
+					if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR {
+						// get its childs and append to queue accordingly
+
+						c := tx.Bucket([]byte(nodeNodesBucket)).Cursor()
+						prefix := []byte(tmp.Hash)
+						for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+							// fmt.Printf("key=%s, value=%s\n", k, v)
+							val := b.Get(v)
+							if val == nil {
+								continue
+							}
+
+							tmpNode := ChanNode{}
+							err := proto.Unmarshal(val, &tmpNode)
+							if err != nil {
+								return err
+							}
+							queue.PushBack(tmpNode)
+						}
+
+					} else {
+						// check if exists in binlayer tables
+						_, err := n.BinLayerEngine.GetBinaryItem(tmp.Hash)
+						if err != nil {
+							unavailableNodes = append(unavailableNodes, tmp.Hash)
+						}
+
+						size, err := hexutil.DecodeUint64(tmp.Size)
+						if err == nil {
+							totalSize += size
+							totalCountItems++
+						}
+						// further checking of actual file on the file system
+					}
+
+					queue.Remove(el)
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				return err
+			}
+
+			if totalSize > 0 {
+				var feesGB, _ = new(big.Int).SetString(n.BinLayerEngine.FeesPerGB, 10)
+				var gbInBytes, _ = new(big.Int).SetString("1073741824", 10)
+				ts := hexutil.EncodeUint64(totalSize)
+				tsBig, _ := hexutil.DecodeBig(ts)
+				factor := gbInBytes.Div(gbInBytes, tsBig)
+				finalAmount := feesGB.Div(feesGB, factor)
+				finalAmountHex := hexutil.EncodeBig(finalAmount)
+
+				dqres := DataQueryResponse{
+					UnavailableNodes:  unavailableNodes,
+					FromPeerAddr:      n.GetReachableAddr(),
+					TotalFeesRequired: finalAmountHex,
+					Timestamp:         time.Now().Unix(),
+				}
+
+				ctx := context.Background()
+				pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
+				if err == nil {
+					success := n.DataQueryProtocol.SendDataQueryResponse(pinfo, &dqres)
+					if success {
+						log.Println("Successfully sent message back to initiator peer")
+					}
+				} else {
+					log.Warn(err)
+				}
+
+				log.Println(err, "total amount ", finalAmountHex, " items ", totalCountItems, dqres)
+			}
+
+			// s, err := n.Host.NewStream(ctx, p, DataQueryServiceID)
+		}
 	}
 	return nil
 }
@@ -194,7 +341,7 @@ func (n *Node) ApplyGossip(ctx context.Context, maxMessageSize int) (err error) 
 		return err
 	}
 
-	n.Gossip.Topic = "TOPIC"
+	n.Gossip.Topic = "PROBAGATION"
 	n.Gossip.Subscription, err = n.Gossip.PubSub.Subscribe(n.Gossip.Topic)
 	if err != nil {
 		return err

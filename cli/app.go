@@ -46,7 +46,7 @@ func entry(ctx *cli.Context) error {
 	bn := binlayer.Engine{}
 
 	if cfg.Global.BinLayer {
-		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken)
+		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken, cfg.Global.BinLayerFeesGB)
 		bn.Enabled = true
 		log.Println("Binlayer storage is enabled")
 	} else {
@@ -99,6 +99,15 @@ func entry(ctx *cli.Context) error {
 		return err
 	}
 
+	log.Println("Node multiaddress ", node.Host.Addrs()[0].String())
+
+	// how can this node be reached
+	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
+	for _, lid := range node.Host.Addrs() {
+		fulladdr := lid.Encapsulate(hostAddr)
+		log.Println("Can be reached on: ", fulladdr.String())
+	}
+
 	if cfg.Global.Mine {
 		if cfg.Global.MineKeypath == "" {
 			log.Fatal("Keyfile can't be empty")
@@ -112,6 +121,7 @@ func entry(ctx *cli.Context) error {
 
 	// register the services
 	node.BlockService = npkg.NewBlockService(&node)
+	node.DataQueryProtocol = npkg.NewDataQueryProtocol(&node)
 
 	log.Println("Blockchain height: ", node.BlockChain.GetHeight())
 	block, _ := node.BlockChain.GetBlockByHeight(node.BlockChain.GetHeight())
@@ -122,12 +132,6 @@ func entry(ctx *cli.Context) error {
 	// apply pubsub gossip to listen for incoming blocks and transactions
 	node.ApplyGossip(ctx2, cfg.P2P.GossipMaxMessageSize)
 
-	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
-
-	for _, lid := range node.Host.Addrs() {
-		fulladdr := lid.Encapsulate(hostAddr)
-		log.Println("Listening on: ", fulladdr)
-	}
 	bootnodesCli := cfg.P2P.Bootstraper.Nodes
 	if len(bootnodesCli) > 0 {
 		err = node.Bootstrap(ctx2, bootnodesCli)
