@@ -4,14 +4,15 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/libp2p/go-libp2p-core/crypto"
 	ffgcrypto "github.com/filefilego/filefilego/crypto"
+	"github.com/libp2p/go-libp2p-core/crypto"
 )
 
+// Verifier represents a block verifier/sealer
 type Verifier struct {
-	Address         string
-	InitialBalance  string
-	PublicKey       string
+	Address         string `json:"address"`
+	InitialBalance  string `json:"initial_balance"`
+	PublicKey       string `json:"public_key"`
 	PublicKeyCrypto crypto.PubKey
 }
 

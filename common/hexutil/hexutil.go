@@ -51,6 +51,11 @@ func MustDecode(input string) []byte {
 	return dec
 }
 
+// EncodeNoPrefix encodes b as a hex string without 0x prefix.
+func EncodeNoPrefix(b []byte) string {
+	return hex.EncodeToString(b)
+}
+
 // Encode encodes b as a hex string with 0x prefix.
 func Encode(b []byte) string {
 	return "0x" + hex.EncodeToString(b)

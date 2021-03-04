@@ -4,46 +4,47 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/gob"
 
 	log "github.com/sirupsen/logrus"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // GetTransactionID gets a hash of a transaction
 func GetTransactionID(tx *Transaction) []byte {
-	var encoded bytes.Buffer
-	var hash [32]byte
-	enc := gob.NewEncoder(&encoded)
-	err := enc.Encode(tx)
-	if err != nil {
-		log.Panic(err)
-	}
-	hash = sha256.Sum256(encoded.Bytes())
+	data := bytes.Join(
+		[][]byte{
+			[]byte(tx.PubKey),
+			[]byte(tx.Nounce),
+			tx.Data,
+			[]byte(tx.From),
+			[]byte(tx.To),
+			[]byte(tx.Value),
+			[]byte(tx.TransactionFees),
+			GetBlockchainSettings().Chain,
+		},
+		[]byte{},
+	)
+	hash := sha256.Sum256(data)
 	bts := hash[:]
 	return bts
 }
 
-// SerializeTransaction
+// SerializeTransaction serialized  transaction
 func SerializeTransaction(tx Transaction) []byte {
-	var encoded bytes.Buffer
-	enc := gob.NewEncoder(&encoded)
-	err := enc.Encode(&tx)
+	blkBts, err := proto.Marshal(&tx)
 	if err != nil {
-		log.Panic(err)
+		log.Println(err)
 	}
-	return encoded.Bytes()
+	return blkBts
 }
 
-// SerializeTransaction
+// UnserializeTransaction converts a byte array to a transaction
 func UnserializeTransaction(data []byte) Transaction {
-	var transaction Transaction
-
-	decoder := gob.NewDecoder(bytes.NewReader(data))
-	err := decoder.Decode(&transaction)
-	if err != nil {
-		log.Panic(err)
+	tx := Transaction{}
+	if err := proto.Unmarshal(data, &tx); err != nil {
+		log.Warn("error while unmarshalling data from stream: ", err)
 	}
-	return transaction
+	return tx
 }
 
 // IntToHex converts an int64 to a byte array

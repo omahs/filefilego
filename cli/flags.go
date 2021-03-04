@@ -39,6 +39,36 @@ var (
 		Usage: "Passphrase of keyfile",
 	}
 
+	FullText = cli.BoolFlag{
+		Name:  "fulltext",
+		Usage: "Enable full-text indexing",
+	}
+
+	FullTextResultCount = cli.IntFlag{
+		Name:  "fulltextresultcount",
+		Usage: "Max number of documents per search query",
+	}
+
+	BinLayer = cli.BoolFlag{
+		Name:  "binlayer",
+		Usage: "Enable binlayer storage",
+	}
+
+	BinLayerDir = cli.StringFlag{
+		Name:  "binlayerdir",
+		Usage: "Storage location for binlayer",
+	}
+
+	BinLayerToken = cli.StringFlag{
+		Name:  "binlayer_token",
+		Usage: "Access token for binlayer",
+	}
+
+	BinLayerFeesGB = cli.StringFlag{
+		Name:  "binlayerfeesgb",
+		Usage: "Binlayer fees (ARAN) per GB of data",
+	}
+
 	RPCFlag = cli.BoolFlag{
 		Name:  "rpc",
 		Usage: "Enable JSON-RPC protocol",
@@ -104,6 +134,11 @@ var (
 		Usage: "WS-RPC cross-origin value",
 	}
 
+	P2PMaxGossipSize = cli.IntFlag{
+		Name:  "maxgossipsize",
+		Usage: "Maximum gossip size",
+	}
+
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of peers to connect",
@@ -152,6 +187,12 @@ var AppFlags = []cli.Flag{
 	MineFlag,
 	MineKeypath,
 	MinePass,
+	FullText,
+	FullTextResultCount,
+	BinLayer,
+	BinLayerDir,
+	BinLayerToken,
+	BinLayerFeesGB,
 
 	RPCFlag,
 	RPCServicesFlag,
@@ -166,6 +207,7 @@ var AppFlags = []cli.Flag{
 	RPCWSPortFlag,
 	RPCWSAddrFlag,
 	RPCWSCrossOriginFlag,
+	P2PMaxGossipSize,
 	MaxPeersFlag,
 	P2PListenPortFlag,
 	P2PListenAddrFlag,

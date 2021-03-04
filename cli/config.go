@@ -15,12 +15,18 @@ import (
 func DefaultConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Global: Global{
-			LogLevel:    "TRACE",
-			DataDir:     DefaultDataDir(),
-			KeystoreDir: filepath.Join(DefaultDataDir(), "keystore"),
-			Mine:        false,
-			MineKeypath: "",
-			MinePass:    "",
+			LogLevel:            "TRACE",
+			DataDir:             DefaultDataDir(),
+			KeystoreDir:         filepath.Join(DefaultDataDir(), "keystore"),
+			Mine:                false,
+			MineKeypath:         "",
+			MinePass:            "",
+			FullText:            false,
+			FullTextResultCount: 200,
+			BinLayer:            false,
+			BinLayerDir:         "",
+			BinLayerToken:       "",
+			BinLayerFeesGB:      "1000000000000000000", // 1 Zaran
 		},
 		Host: Host{},
 		RPC: RPC{
@@ -45,11 +51,12 @@ func DefaultConfig() *GlobalConfig {
 			},
 		},
 		P2P: P2P{
-			MaxPeers:           20,
-			ListenPort:         10209,
-			ListenAddress:      "0.0.0.0",
-			ConnectionTimeout:  40,
-			MinPeersThreashold: 2,
+			GossipMaxMessageSize: 10 * 1048576, // 10 MB
+			MaxPeers:             20,
+			ListenPort:           10209,
+			ListenAddress:        "0.0.0.0",
+			ConnectionTimeout:    40,
+			MinPeersThreashold:   2,
 			Bootstraper: Bootstraper{
 				BootstrapPeriodic: 120,
 			},
@@ -96,6 +103,30 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 
 	if ctx.GlobalIsSet(MinePass.Name) {
 		cfg.Global.MinePass = ctx.GlobalString(MinePass.Name)
+	}
+
+	if ctx.GlobalIsSet(FullText.Name) {
+		cfg.Global.FullText = ctx.GlobalBool(FullText.Name)
+	}
+
+	if ctx.GlobalIsSet(FullTextResultCount.Name) {
+		cfg.Global.FullTextResultCount = ctx.GlobalInt(FullTextResultCount.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayer.Name) {
+		cfg.Global.BinLayer = ctx.GlobalBool(BinLayer.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayerDir.Name) {
+		cfg.Global.BinLayerDir = ctx.GlobalString(BinLayerDir.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayerToken.Name) {
+		cfg.Global.BinLayerToken = ctx.GlobalString(BinLayerToken.Name)
+	}
+
+	if ctx.GlobalIsSet(BinLayerFeesGB.Name) {
+		cfg.Global.BinLayerFeesGB = ctx.GlobalString(BinLayerFeesGB.Name)
 	}
 
 	// Host
@@ -157,6 +188,11 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 	}
 
 	// P2P
+
+	if ctx.GlobalIsSet(P2PMaxGossipSize.Name) {
+		cfg.P2P.GossipMaxMessageSize = ctx.GlobalInt(P2PMaxGossipSize.Name)
+	}
+
 	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
 		cfg.P2P.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
 	}

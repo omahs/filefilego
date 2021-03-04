@@ -1,12 +1,18 @@
 package main
 
 type Global struct {
-	LogLevel    string
-	DataDir     string
-	KeystoreDir string
-	Mine        bool
-	MineKeypath string
-	MinePass    string
+	LogLevel            string
+	DataDir             string
+	KeystoreDir         string
+	Mine                bool
+	MineKeypath         string
+	MinePass            string
+	FullText            bool
+	FullTextResultCount int
+	BinLayer            bool
+	BinLayerDir         string
+	BinLayerToken       string
+	BinLayerFeesGB      string
 }
 
 // Host
@@ -26,12 +32,13 @@ type RPC struct {
 
 // P2P
 type P2P struct {
-	MaxPeers           int
-	ListenPort         int
-	ListenAddress      string
-	ConnectionTimeout  int
-	MinPeersThreashold int
-	Bootstraper        Bootstraper
+	GossipMaxMessageSize int
+	MaxPeers             int
+	ListenPort           int
+	ListenAddress        string
+	ConnectionTimeout    int
+	MinPeersThreashold   int
+	Bootstraper          Bootstraper
 }
 
 // DomainSocket

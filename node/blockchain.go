@@ -15,21 +15,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/boltdb/bolt"
-	proto "github.com/golang/protobuf/proto"
 	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/crypto"
 	"github.com/filefilego/filefilego/keystore"
+	"github.com/filefilego/filefilego/search"
+	proto "google.golang.org/protobuf/proto"
 )
 
 const memPool = "mempool"
 const blocksBucket = "blocks"
-const AccountsBucket = "accounts"
-const GenesisBlockHash = "6ed4b64198799637a4c71c25c927d68d81329211af10952f0306b93c16f63ae5"
+const accountsBucket = "accounts"
+const channelBucket = "channels"
+const nodesBucket = "nodes"
+const nodeNodesBucket = "node_nodes"
 
+// TransactionTimestamp represents a transaction and its timestamps
 type TransactionTimestamp struct {
 	Transaction   Transaction
 	Timestamp     int64
@@ -38,29 +43,30 @@ type TransactionTimestamp struct {
 
 // Blockchain implements interactions with a DB
 type Blockchain struct {
-	tip          []byte
-	db           *bolt.DB
-	FilePath     string
-	Key          *keystore.Key
-	HeightMux    sync.Mutex
-	Height       uint64
-	BlockPool    []Block
+	tip       []byte
+	db        *bolt.DB
+	FilePath  string
+	Key       *keystore.Key
+	HeightMux sync.Mutex
+	Height    uint64
+	// BlockPool    []Block
+	BlockPool    map[string]Block
 	BlockPoolMux sync.Mutex
 	MemPool      []Transaction
 	MemPoolMux   sync.Mutex
 	Node         *Node
 }
 
-// BlockchainIterator is used to iterate over blockchain blocks
-type BlockchainIterator struct {
+// ChanNodeIterator is used to iterate over channel nodes
+type ChanNodeIterator struct {
 	currentHash []byte
 	db          *bolt.DB
 }
 
-// AddressState represents the state of an address
-type AddressState struct {
-	Balance []byte
-	Nounce  []byte
+// BlockchainIterator is used to iterate over blockchain blocks
+type BlockchainIterator struct {
+	currentHash []byte
+	db          *bolt.DB
 }
 
 // CloseDB closes the db
@@ -83,10 +89,11 @@ func (bc *Blockchain) GetHeight() uint64 {
 	return height
 }
 
-// GetTransactionByHash
+// GetTransactionByHash returns a transaction by hash
 func (bc *Blockchain) GetTransactionByHash(hash string) (tx Transaction, blck Block, index uint64, err error) {
 	bci := bc.Iterator()
 	index = bc.GetHeight()
+
 	for {
 		block := bci.Next()
 		for _, t := range block.Transactions {
@@ -102,7 +109,7 @@ func (bc *Blockchain) GetTransactionByHash(hash string) (tx Transaction, blck Bl
 	return tx, blck, 0, errors.New("transaction not found")
 }
 
-// GetTransactionByHash
+// GetTransactionsByAddress return transactions of an address
 func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []TransactionTimestamp, err error) {
 	bci := bc.Iterator()
 	total := 0
@@ -117,7 +124,6 @@ func (bc *Blockchain) GetTransactionsByAddress(address string) (tx []Transaction
 			if total > 10 {
 				break
 			}
-
 		}
 
 		if total > 10 {
@@ -222,17 +228,14 @@ func (bc *Blockchain) AddBalanceTo(address string, amount *big.Int) error {
 		currentBalance = currentBalance.Add(currentBalance, amount)
 		addressData.Balance = []byte(hexutil.EncodeBig(currentBalance))
 
-		var result bytes.Buffer
-		encoder := gob.NewEncoder(&result)
-		err = encoder.Encode(&addressData)
+		blkBts, err := proto.Marshal(&addressData)
 		if err != nil {
 			log.Panic(err)
 		}
 
 		err = bc.db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(AccountsBucket))
-			bts := result.Bytes()
-			err = b.Put([]byte(address), bts)
+			b := tx.Bucket([]byte(accountsBucket))
+			err = b.Put([]byte(address), blkBts)
 			if err != nil {
 				return err
 			}
@@ -267,16 +270,15 @@ func (bc *Blockchain) SubBalanceOf(address string, amount *big.Int, nounce strin
 		addressData.Balance = []byte(hexutil.EncodeBig(currentBalance))
 		addressData.Nounce = []byte(nounce)
 
-		var result bytes.Buffer
-		encoder := gob.NewEncoder(&result)
-		err = encoder.Encode(&addressData)
+		blkBts, err := proto.Marshal(&addressData)
+
 		if err != nil {
 			log.Panic(err)
 		}
 
 		err = bc.db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(AccountsBucket))
-			bts := result.Bytes()
+			b := tx.Bucket([]byte(accountsBucket))
+			bts := blkBts
 			err = b.Put([]byte(address), bts)
 			if err != nil {
 				return err
@@ -285,6 +287,307 @@ func (bc *Blockchain) SubBalanceOf(address string, amount *big.Int, nounce strin
 		})
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// MutateChannel performs channel/nodes mutations
+// OPTIONAL: 1. Checking for tx.To since we already checked
+//			 2. Balance requirements depending on node type
+//			 3. isMiningMode is used to avoid constraints when normal nodes receive a block.
+func (bc *Blockchain) MutateChannel(t Transaction, vbalances map[string]*big.Int, isMiningMode bool) error {
+	ap := TransactionDataPayload{}
+	bts, _ := proto.Marshal(&ap)
+	originHex := hexutil.Encode(bts) // need this to see if the ChanActionPayload is the same after unmarshalling
+	if err := proto.Unmarshal(t.Data, &ap); err != nil {
+		log.Warn("Invalid transaction payload of type ChanActionPayload. Ignore as it's possible to store any arbitrary data", err)
+		return err
+	}
+
+	bts, _ = proto.Marshal(&ap)
+	afterUnmarshalHex := hexutil.Encode(bts)
+
+	// for each TransactionDataPayloadType do the appropriate unmarshalling
+	if originHex != afterUnmarshalHex {
+
+		txVal, err1 := hexutil.DecodeBig(t.Value)
+		if err1 != nil {
+			return err1
+		}
+
+		switch ap.Type {
+		case TransactionDataPayloadType_CREATE_NODE:
+			{
+				chEnvs := ChanNodeEnvelop{}
+				err := proto.Unmarshal(ap.Payload, &chEnvs)
+				if err != nil {
+					return err
+				}
+
+				for _, chaNode := range chEnvs.Nodes {
+					// unmarshal the payload
+
+					p := bluemonday.NewPolicy()
+					p.AllowElements("h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "p", "a", "ul", "ol", "nl", "li", "b", "i", "strong", "em", "strike", "code", "hr", "br", "div", "table", "thead", "caption", "tbody", "tr", "th", "td", "pre", "style")
+					chaNode.Description = p.Sanitize(chaNode.Description)
+
+					chaNode.Owner = t.From
+					chaNode.Timestamp = time.Now().Unix()
+
+					// if channel remove parent as a security measure
+					if chaNode.NodeType == ChanNodeType_CHANNEL {
+						var regFee, _ = new(big.Int).SetString(GetBlockchainSettings().NamespaceRegistrationFee, 10)
+						if txVal.Cmp(regFee) < 0 {
+							continue
+						}
+
+						if isMiningMode {
+							txVal = txVal.Sub(txVal, regFee)
+							currentBalance, ok := vbalances[t.From]
+							if !ok {
+								log.Error("couldn't get the balance of address. This shouldn't have happened")
+								continue
+							}
+							remainingBalance := currentBalance.Sub(currentBalance, regFee)
+							vbalances[t.From] = remainingBalance
+
+						}
+
+						data := bytes.Join(
+							[][]byte{
+								[]byte(t.From),
+								[]byte(chaNode.Name),
+							},
+							[]byte{},
+						)
+
+						chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
+						chaNode.ParentHash = ""
+						chaNode.Size = ""
+						chaNode.ContentType = ""
+					}
+
+					if chaNode.NodeType == ChanNodeType_OTHER || chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE || chaNode.NodeType == ChanNodeType_ENTRY || chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+						// check if parent hash exists and correct permissions:
+						// 1. If its admin or
+						if chaNode.ParentHash == "" {
+							log.Error("ParentHash not specified")
+							continue
+						}
+
+						data := bytes.Join(
+							[][]byte{
+								[]byte(chaNode.ParentHash),
+								[]byte(chaNode.Name),
+							},
+							[]byte{},
+						)
+
+						chaNode.Hash = hexutil.Encode(crypto.Sha256HashHexBytes(data))
+
+						// check if parent hash is available
+						err := bc.db.View(func(tx *bolt.Tx) error {
+							b := tx.Bucket([]byte(nodesBucket))
+							exists := b.Get([]byte(chaNode.ParentHash))
+							if exists == nil {
+								return errors.New("ParentHash Node is not in the blockchain")
+							}
+
+							return nil
+						})
+						if err != nil {
+							log.Error(err)
+							continue
+						}
+
+						// go back to the root and find the permissions
+						cni := bc.ChanNodeIterator([]byte(chaNode.ParentHash))
+						nodesIndex := uint64(0)
+						breakOuter := false
+						for {
+							parentNode := cni.Next()
+							nodesIndex++
+
+							// apply structure constrains here
+							if nodesIndex == 1 {
+								if chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+										log.Error("SUBCHANNEL allowed only in channels and other subchnnels")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_ENTRY {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL) {
+										log.Error("ENTRY allowed only in channels and other subchnnels")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_DIR || chaNode.NodeType == ChanNodeType_FILE {
+									if !(parentNode.NodeType == ChanNodeType_CHANNEL || parentNode.NodeType == ChanNodeType_SUBCHANNEL || parentNode.NodeType == ChanNodeType_ENTRY || parentNode.NodeType == ChanNodeType_DIR) {
+										log.Error("DIR/FILE allowed only in channels, subchnnels, dirs and entries")
+										breakOuter = true
+										break
+									}
+								}
+
+								if chaNode.NodeType == ChanNodeType_OTHER {
+									if parentNode.NodeType != ChanNodeType_ENTRY {
+										log.Error("OTHER allowed only in entry")
+										breakOuter = true
+										break
+									}
+								}
+							}
+
+							// if we reached root node
+							if parentNode.ParentHash == "" {
+								hasPermission, isPoster, isGuest := false, false, false
+
+								// if an admin
+								if parentNode.Owner == t.From {
+									hasPermission = true
+								}
+
+								// if in admins
+								for _, v := range parentNode.Admins {
+									if v == t.From {
+										hasPermission = true
+										break
+									}
+								}
+
+								// if in posters or wildcard * is applied then allow as poster
+								for _, v := range parentNode.Posters {
+									if v == t.From {
+										hasPermission = true
+										isPoster = true
+										break
+									} else if v == "*" {
+										hasPermission = true
+										isPoster = true
+									}
+								}
+
+								// if nodetype is OTHER (could be comment)
+								if chaNode.NodeType == ChanNodeType_OTHER && !hasPermission {
+									hasPermission = true
+									isGuest = true
+								}
+
+								// if poster, then allow only to add ENTRY and DIR and FILE and OTHER
+								if isPoster && chaNode.NodeType == ChanNodeType_SUBCHANNEL {
+									log.Error("Poster can not create channel and subchannel")
+									breakOuter = true
+									break
+								}
+
+								if !hasPermission {
+									log.Error("No permission to create node")
+									breakOuter = true
+									break
+								}
+
+								// if its a guest who posting OTHER type of nodes which might be a comment then apply fees
+								if isGuest && isMiningMode {
+									// apply fees
+									currentBalance, ok := vbalances[t.From]
+									if !ok {
+										log.Error("couldn't get the balance of address. This shouldn't have happened")
+										breakOuter = true
+										break
+									}
+									var commentFees, _ = new(big.Int).SetString(GetBlockchainSettings().NodeCreationFeesGuest, 10)
+									if currentBalance.Cmp(commentFees) < 0 {
+										log.Error("No enough balance to post")
+										breakOuter = true
+										break
+									}
+
+									if txVal.Cmp(commentFees) < 0 {
+										log.Error("No enough balance to post")
+										breakOuter = true
+										break
+									}
+
+									// update the runtime addresses balance
+									remainingBalance := currentBalance.Sub(currentBalance, commentFees)
+									txVal = txVal.Sub(txVal, commentFees)
+									vbalances[t.From] = remainingBalance
+
+								}
+								break
+							}
+						}
+
+						if breakOuter {
+							continue
+						}
+
+					}
+
+					blkBts, _ := proto.Marshal(chaNode)
+
+					err := bc.db.Update(func(tx *bolt.Tx) error {
+						b := tx.Bucket([]byte(nodesBucket))
+						exists := b.Get([]byte(chaNode.Hash))
+						if exists != nil {
+							return errors.New("Node hash already exists in the blockchain")
+						}
+
+						err := b.Put([]byte(chaNode.Hash), blkBts)
+						if err != nil {
+							return err
+						}
+
+						// if channel then update the channels bucket
+						if chaNode.NodeType == ChanNodeType_CHANNEL {
+							chBucket := tx.Bucket([]byte(channelBucket))
+							id, _ := chBucket.NextSequence()
+							err := chBucket.Put(common.Itob(id), []byte(chaNode.Hash))
+							if err != nil {
+								return err
+							}
+						} else {
+							// add relations by using the intermidiate bucket
+							chBucket := tx.Bucket([]byte(nodeNodesBucket))
+							key := bytes.Join([][]byte{
+								[]byte(chaNode.ParentHash),
+								[]byte(chaNode.Hash),
+							}, []byte{})
+							err := chBucket.Put(key, []byte(chaNode.Hash))
+							if err != nil {
+								return err
+							}
+						}
+
+						// index fulltext
+						if bc.Node.SearchEngine.Enabled && chaNode.NodeType != ChanNodeType_OTHER {
+							indexItem := search.IndexItem{Hash: chaNode.Hash, Type: int32(chaNode.NodeType), Name: chaNode.Name, Description: chaNode.Description}
+							bc.Node.SearchEngine.IndexItem(indexItem)
+						}
+
+						return nil
+					})
+
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+				}
+			}
+		case TransactionDataPayloadType_UPDATE_NODE:
+			{
+				//
+			}
+		case TransactionDataPayloadType_UPDATE_BLOCKCHAIN_SETTINGS:
+			{
+				//
+			}
 		}
 	}
 	return nil
@@ -356,30 +659,18 @@ func (bc *Blockchain) HasThisBalance(address string, amount *big.Int) (bool, *bi
 		cmpRes := blncInt.CmpAbs(amount)
 		if cmpRes == -1 {
 			return false, nil, nil, errors.New("No enough balance")
-		} else {
-			return true, blncInt, nounceInt, nil
 		}
+
+		return true, blncInt, nounceInt, nil
+
 	}
 	return false, nil, nil, errors.New("No enough balance")
 }
 
 // SignTransaction signs a transaction with privatekey
 func (bc *Blockchain) SignTransaction(transaction Transaction, key *keystore.Key) (Transaction, error) {
-	data := bytes.Join(
-		[][]byte{
-			[]byte(transaction.PubKey),
-			[]byte(transaction.Nounce),
-			transaction.Data,
-			[]byte(transaction.From),
-			[]byte(transaction.To),
-			[]byte(transaction.Value),
-			[]byte(transaction.TransactionFees),
-		},
-		[]byte{},
-	)
 
-	hash := sha256.Sum256(data)
-	transaction.Hash = hash[:]
+	transaction.Hash = GetTransactionID(&transaction)
 
 	bts, err := key.Private.Sign(transaction.Hash)
 	if err != nil {
@@ -394,6 +685,10 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 	zero, _ := new(big.Int).SetString("0", 10)
 	if len(transaction.Hash) == 0 || transaction.Hash == nil {
 		return false, errors.New("Hash is empty")
+	}
+
+	if !reflect.DeepEqual(transaction.Chain, GetBlockchainSettings().Chain) {
+		return false, errors.New("Chain is wrong")
 	}
 
 	if transaction.From == "" {
@@ -433,22 +728,24 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 		return false, errors.New("Value is negative")
 	}
 
-	data := bytes.Join(
-		[][]byte{
-			[]byte(transaction.PubKey),
-			[]byte(transaction.Nounce),
-			transaction.Data,
-			[]byte(transaction.From),
-			[]byte(transaction.To),
-			[]byte(transaction.Value),
-			[]byte(transaction.TransactionFees),
-		},
-		[]byte{},
-	)
+	// data := bytes.Join(
+	// 	[][]byte{
+	// 		[]byte(transaction.PubKey),
+	// 		[]byte(transaction.Nounce),
+	// 		transaction.Data,
+	// 		[]byte(transaction.From),
+	// 		[]byte(transaction.To),
+	// 		[]byte(transaction.Value),
+	// 		[]byte(transaction.TransactionFees),
+	// 	},
+	// 	[]byte{},
+	// )
 
-	hash := sha256.Sum256(data)
+	// hash := sha256.Sum256(data)
 
-	if !reflect.DeepEqual(transaction.Hash, hash[:]) {
+	hash := GetTransactionID(&transaction)
+
+	if !reflect.DeepEqual(transaction.Hash, hash) {
 		return false, errors.New("transaction is altered and doesn't match the hash")
 	}
 
@@ -506,49 +803,38 @@ func (bc *Blockchain) GetNounceFromMemPool(address string) (string, error) {
 func (bc *Blockchain) AddBlockPool(block Block) error {
 	bc.BlockPoolMux.Lock()
 	defer bc.BlockPoolMux.Unlock()
-	for _, v := range bc.BlockPool {
-		if reflect.DeepEqual(v.Hash, block.Hash) {
-			return errors.New("a block with the same hash is already in blockpool")
-		}
 
+	if len(block.Hash) == 0 {
+		return errors.New("block has no hash data")
 	}
 
-	// chceck if the block is within the db already
-	// blockAlreadyInDb := false
-	// bc.TraverseChain(func(blc Block) {
-	// 	if reflect.DeepEqual(blc.Hash, block.Hash) {
-	// 		blockAlreadyInDb = true
-	// 	}
-	// })
-
-	// if blockAlreadyInDb {
-	// 	return errors.New("a block with the same hash is already in the db")
-	// }
-
-	bc.BlockPool = append(bc.BlockPool, block)
-
-	// check the chain and append the one which apply
-	// 1. get the last hash from db
+	_, ok := bc.BlockPool[hex.EncodeToString(block.Hash)]
+	if ok {
+		return errors.New("a block with the same hash is already in blockpool")
+	}
 	last := []byte{}
 	bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		v := b.Get([]byte("l"))
+		lastbytes := b.Get([]byte("l"))
 
-		last = make([]byte, len(v))
-		copy(last, v)
+		last = make([]byte, len(lastbytes))
+		copy(last, lastbytes)
 
-		if v == nil {
-			return errors.New("Value doesn't exists")
+		v := b.Get(block.Hash)
+		if v != nil {
+			return errors.New("block already within the blockchain db")
 		}
 		return nil
 	})
+
+	bc.BlockPool[hex.EncodeToString(block.Hash)] = block
 
 	// 2. go through all the blocks in pool
 	for {
 		found := false
 		for _, v := range bc.BlockPool {
 			// 3. if there is a block which matches the previous hash then insert and start the process again
-			if reflect.DeepEqual(v.PrevBlockHash, last) {
+			if hex.EncodeToString(v.PrevBlockHash) == hex.EncodeToString(last) {
 				found = true
 				err := bc.db.Update(func(tx *bolt.Tx) error {
 					b := tx.Bucket([]byte(blocksBucket))
@@ -562,7 +848,11 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 						log.Panic(err)
 					}
 
-					bc.tip = v.Hash
+					bc.tip = make([]byte, len(v.Hash))
+					copy(bc.tip, v.Hash)
+
+					last = make([]byte, len(v.Hash))
+					copy(last, v.Hash)
 
 					return nil
 				})
@@ -576,13 +866,24 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 					isCoinbase := vc.From == "" && vc.Nounce == "0x0" && vc.TransactionFees == "0x0"
 					err := bc.MutateAddressStateFromTransaction(*vc, isCoinbase)
 					if err != nil {
-						log.Println("mutation error", err)
+						log.Warn("mutation error", err)
 
+					}
+
+					// perform channel mutations if available
+					vbalances := make(map[string]*big.Int)
+					err = bc.MutateChannel(*vc, vbalances, false)
+					if err != nil {
+						log.Warn("MUTATION CHAN ERROR: ", err)
 					}
 					bc.RemoveMemPool(vc)
 				}
+
 				bc.AddHeight(1)
-				bc.removeBlockPool(&v)
+				err = bc.removeBlockPool(&v)
+				if err != nil {
+					log.Warn("removeBlockPool: ", err)
+				}
 			}
 		}
 
@@ -592,15 +893,13 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	}
 
 	// if blockPool len > 0, some blocks are missing so trigger a sync here
-	if len(bc.BlockPool) > 0 && !bc.Node.IsSyncing() {
-		bc.Node.BlockService.Node.SetSyncing(false)
+	if len(bc.BlockPool) > 0 && !bc.Node.GetSyncing() {
+		log.Info("sync triggered. Blockpool size: ", len(bc.BlockPool))
+		bc.Node.BlockProtocol.ClearRemotePeers()
+		bc.Node.BlockChain.ClearBlockPool()
+		bc.Node.SetSyncing(false)
 		bc.Node.Sync(context.Background())
-
 	}
-	// if len(bc.BlockPool) > 0 {
-	// 	bc.Node.BlockService.Node.SetSyncing(false)
-	// 	bc.Node.Sync(context.Background())
-	// }
 
 	return nil
 }
@@ -608,57 +907,56 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 // ClearBlockPool clears the blockpool
 func (bc *Blockchain) ClearBlockPool() {
 	bc.BlockPoolMux.Lock()
-	bc.BlockPool = []Block{}
+	bc.BlockPool = map[string]Block{} // []Block{}
 	bc.BlockPoolMux.Unlock()
 }
 
 func (bc *Blockchain) removeBlockPool(block *Block) error {
-	for s, v := range bc.BlockPool {
-		if reflect.DeepEqual(v.Hash, block.Hash) {
-			bc.BlockPool = append(bc.BlockPool[:s], bc.BlockPool[s+1:]...)
-			return nil
-		}
+	_, ok := bc.BlockPool[hex.EncodeToString(block.Hash)]
+	if ok {
+		delete(bc.BlockPool, hex.EncodeToString(block.Hash))
+		return nil
 	}
 	return errors.New("Block not in blockpool")
 }
 
 // SerializeBlockPool serializes the blockpool to bytes
-func (bc *Blockchain) SerializeBlockPool() ([]byte, error) {
+// func (bc *Blockchain) SerializeBlockPool() ([]byte, error) {
 
-	var result bytes.Buffer
-	encoder := gob.NewEncoder(&result)
+// 	var result bytes.Buffer
+// 	encoder := gob.NewEncoder(&result)
 
-	err := encoder.Encode(bc.BlockPool)
-	if err != nil {
-		return nil, err
-	}
+// 	err := encoder.Encode(bc.BlockPool)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return result.Bytes(), nil
-}
+// 	return result.Bytes(), nil
+// }
 
-// PersistMemPoolToDB persists all transactions to the db
-func (bc *Blockchain) PersistBlockPoolToDB() error {
-	bc.BlockPoolMux.Lock()
-	defer bc.BlockPoolMux.Unlock()
-	if len(bc.BlockPool) > 0 {
-		err := bc.db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(memPool))
-			serialized, err := bc.SerializeBlockPool()
-			if err != nil {
-				return err
-			}
-			err = b.Put([]byte("blocks"), serialized)
-			if err != nil {
-				return err
-			}
-			log.Printf("Persisted %d bytes from blockpool to the database ", len(serialized))
-			return nil
-		})
-		return err
-	}
+// PersistBlockPoolToDB persists all transactions to the db
+// func (bc *Blockchain) PersistBlockPoolToDB() error {
+// 	bc.BlockPoolMux.Lock()
+// 	defer bc.BlockPoolMux.Unlock()
+// 	if len(bc.BlockPool) > 0 {
+// 		err := bc.db.Update(func(tx *bolt.Tx) error {
+// 			b := tx.Bucket([]byte(memPool))
+// 			serialized, err := bc.SerializeBlockPool()
+// 			if err != nil {
+// 				return err
+// 			}
+// 			err = b.Put([]byte("blocks"), serialized)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			log.Printf("Persisted %d bytes from blockpool to the database ", len(serialized))
+// 			return nil
+// 		})
+// 		return err
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // AddMemPool adds a transaction to the mempool
 func (bc *Blockchain) AddMemPool(transaction Transaction) error {
@@ -810,6 +1108,12 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) Block {
 	return newBlock
 }
 
+// ChanNodeIterator returns a ChanNodeIterator
+func (bc *Blockchain) ChanNodeIterator(hash []byte) *ChanNodeIterator {
+	bci := &ChanNodeIterator{hash, bc.db}
+	return bci
+}
+
 // Iterator returns a BlockchainIterat
 func (bc *Blockchain) Iterator() *BlockchainIterator {
 	bci := &BlockchainIterator{bc.tip, bc.db}
@@ -817,14 +1121,15 @@ func (bc *Blockchain) Iterator() *BlockchainIterator {
 	return bci
 }
 
+// AddressDataResult represents enum errors
 type AddressDataResult int
 
 const (
-	// NoBalance
+	// NoBalance has no balance
 	NoBalance AddressDataResult = iota
-	// AddressDecodeError
+	// AddressDecodeError problem with address
 	AddressDecodeError
-	// NoError
+	// NoError no error
 	NoError
 )
 
@@ -838,7 +1143,7 @@ func (bc *Blockchain) GetAddressData(address string) (ads AddressState, merr Add
 
 	tmpError := NoError
 	bc.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(AccountsBucket))
+		b := tx.Bucket([]byte(accountsBucket))
 
 		addressData := b.Get(addrbytes)
 
@@ -847,13 +1152,12 @@ func (bc *Blockchain) GetAddressData(address string) (ads AddressState, merr Add
 			return errors.New("No address state found")
 		}
 
-		decoder := gob.NewDecoder(bytes.NewReader(addressData))
-		err := decoder.Decode(&ads)
-
-		if err != nil {
+		if err := proto.Unmarshal(addressData, &ads); err != nil {
+			log.Warn("error while unmarshalling GetAddressData: ", err)
 			tmpError = AddressDecodeError
 			return err
 		}
+
 		return nil
 	})
 
@@ -861,6 +1165,19 @@ func (bc *Blockchain) GetAddressData(address string) (ads AddressState, merr Add
 }
 
 type transform func(Block)
+type transformNode func(ChanNode)
+
+// TraverseChanNodes goes through all the channel nodes up to parent
+func (bc *Blockchain) TraverseChanNodes(hash []byte, fn transformNode) {
+	bci := bc.ChanNodeIterator(hash)
+	for {
+		chanNode := bci.Next()
+		fn(chanNode)
+		if chanNode.ParentHash == "" || len(chanNode.ParentHash) == 0 {
+			break
+		}
+	}
+}
 
 // TraverseChain goes through all the blocks
 func (bc *Blockchain) TraverseChain(fn transform) {
@@ -874,7 +1191,7 @@ func (bc *Blockchain) TraverseChain(fn transform) {
 	}
 }
 
-// this was needed as the ordering of the bc.MemPool was buggy
+// TxNounce this was needed as the ordering of the bc.MemPool was buggy
 type TxNounce struct {
 	Hash        string
 	Nounce      string
@@ -882,14 +1199,14 @@ type TxNounce struct {
 }
 
 // PreparePoolBlocksForMining gets txs from mempool and prepares them
-func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
+func (bc *Blockchain) PreparePoolBlocksForMining() ([]*Transaction, map[string]*big.Int) {
 	// 1. check if a tx is valid structure (hash, sig, etc.)
 	// 2. check if the nounce is the next one of the current db nounce
 	// 3. check if address has enough balance
 	bc.MemPoolMux.Lock()
 	defer bc.MemPoolMux.Unlock()
 	log.Println("Preparing block for mining")
-	log.Println("MemPool size ", len(bc.MemPool))
+	log.Println("MemPool size: ", len(bc.MemPool), " BlockPool size: ", len(bc.BlockPool))
 
 	txNounces := []TxNounce{}
 	zeroBig, _ := hexutil.DecodeBig("0x0")
@@ -919,7 +1236,6 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 	for _, t := range txNounces {
 
 		v := t.Transaction
-
 		val, err := hexutil.DecodeBig(v.Value)
 		if err != nil {
 			log.Println("Invalid transaction value found: ", hexutil.Encode(v.Hash))
@@ -994,6 +1310,7 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 			}
 		}
 
+		// this ensures that if more than 1 tx try to modify an addresses state without sufficient amount, then reject
 		if !isInVerified {
 			abalance, ok := vbalances[v.From]
 			if !ok {
@@ -1005,8 +1322,16 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 					continue
 				}
 
+				// check if transaction payload is a channel
+				// and test for validity with the restrictions
+				if !IsValidChannelPayload(v, currentBalance) {
+					bc.RemoveMemPool(&v)
+					continue
+				}
+
 				remainingBalance := currentBalance.Sub(currentBalance, txVal)
 				vbalances[v.From] = remainingBalance
+
 			} else {
 				// already found in verified array
 				// subtract from there and not db account balanace
@@ -1020,6 +1345,13 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 					continue
 				}
 
+				// check if transaction payload is a channel
+				// and test for validity with the restrictions
+				if !IsValidChannelPayload(v, abalance) {
+					bc.RemoveMemPool(&v)
+					continue
+				}
+
 				remainingBalance := abalance.Sub(abalance, txVal)
 				vbalances[v.From] = remainingBalance
 			}
@@ -1027,7 +1359,7 @@ func (bc *Blockchain) PreparePoolBlocksForMining() []*Transaction {
 		}
 		bc.RemoveMemPool(&v)
 	}
-	return verifiedTxs
+	return verifiedTxs, vbalances
 }
 
 // CalculateReward calculates the reward for each block given the begining of the genesis timestamp
@@ -1041,12 +1373,13 @@ func (bc *Blockchain) MineScheduler() {
 	for {
 		<-time.After(time.Duration(GetBlockchainSettings().BlockTimeSeconds) * time.Second)
 
-		txs := bc.PreparePoolBlocksForMining()
+		txs, vbalances := bc.PreparePoolBlocksForMining()
 
 		for _, v := range txs {
 			log.Info("prepareing to seal tx ", hexutil.Encode(v.Hash), " with nounce: ", v.Nounce)
 		}
 		cbtx := Transaction{
+			Chain:           GetBlockchainSettings().Chain,
 			From:            "",
 			To:              GetBlockchainSettings().Verifiers[0].Address,
 			Data:            []byte(""),
@@ -1071,6 +1404,13 @@ func (bc *Blockchain) MineScheduler() {
 			err := bc.MutateAddressStateFromTransaction(*v, isCoinbase)
 			if err != nil {
 				log.Println("mutation error", err, isCoinbase)
+				continue
+			}
+
+			// perform channel mutations if available
+			err = bc.MutateChannel(*v, vbalances, true)
+			if err != nil {
+				log.Println("MUTATION CHAN ERROR: ", err)
 			}
 		}
 		bc.AddHeight(1)
@@ -1082,7 +1422,7 @@ func (bc *Blockchain) MineScheduler() {
 			Payload: minedBlockData,
 		}
 
-		log.Println("Broadcasting nodes: ", bc.Node.Peers().Len())
+		log.Println("Broadcasting nodes: ", bc.Node.Peers().Len()-1)
 		blkBts, err := proto.Marshal(&blk)
 		if err != nil {
 			log.Warn("Error while marshaling block to protobuff: ", err)
@@ -1093,6 +1433,28 @@ func (bc *Blockchain) MineScheduler() {
 		}
 
 	}
+}
+
+// Next returns next node starting from the tip
+func (i *ChanNodeIterator) Next() ChanNode {
+	var blckDt []byte
+	err := i.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		v := b.Get(i.currentHash)
+		blckDt = make([]byte, len(v))
+		copy(blckDt, v)
+		return nil
+	})
+
+	chNode := ChanNode{}
+
+	err = proto.Unmarshal(blckDt, &chNode)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	i.currentHash = []byte(chNode.ParentHash)
+	return chNode
 }
 
 // Next returns next block starting from the tip
@@ -1148,6 +1510,7 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 		Height:       0,
 		Node:         n,
 		BlockPoolMux: sync.Mutex{},
+		BlockPool:    make(map[string]Block),
 		MemPoolMux:   sync.Mutex{},
 		HeightMux:    sync.Mutex{},
 	}
@@ -1184,6 +1547,7 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 			var txVal, _ = new(big.Int).SetString(GetBlockchainSettings().Verifiers[0].InitialBalance, 10)
 
 			cbtx := Transaction{
+				Chain: GetBlockchainSettings().Chain,
 				From:  "",
 				To:    GetBlockchainSettings().Verifiers[0].Address,
 				Data:  []byte("Whoever would overthrow the liberty of a nation must begin by subduing the freeness of speech"),
@@ -1212,7 +1576,13 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 			log.Println("Genesis block hash ", hex.EncodeToString(block.Hash))
 
 			// create the buckets
-			accBucket, err := tx.CreateBucket([]byte(AccountsBucket))
+			tx.CreateBucketIfNotExists([]byte(memPool))
+			tx.CreateBucketIfNotExists([]byte(channelBucket))
+			tx.CreateBucketIfNotExists([]byte(nodesBucket))
+			tx.CreateBucketIfNotExists([]byte(nodeNodesBucket))
+
+			accBucket, err := tx.CreateBucketIfNotExists([]byte(accountsBucket))
+			// accBucket, err := tx.CreateBucket([]byte(accountsBucket))
 			if err != nil {
 				log.Panic(err)
 			}
@@ -1224,19 +1594,15 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 				Nounce:  []byte(hexutil.EncodeBig(nounceVal)),
 			}
 
-			var result bytes.Buffer
-			encoder := gob.NewEncoder(&result)
+			blkBts, err := proto.Marshal(adState)
 
-			err = encoder.Encode(adState)
 			if err != nil {
 				log.Panic(err)
 			}
 
-			err = accBucket.Put([]byte(GetBlockchainSettings().Verifiers[0].Address), result.Bytes())
+			err = accBucket.Put([]byte(GetBlockchainSettings().Verifiers[0].Address), blkBts)
 
-			tx.CreateBucket([]byte(memPool))
-
-			b, err := tx.CreateBucket([]byte(blocksBucket))
+			b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
 			if err != nil {
 				log.Panic(err)
 			}
@@ -1271,9 +1637,9 @@ func CreateOrLoadBlockchain(n *Node, dataDir string, mineKeypath string, mineKey
 	log.Println("Verifying blocks")
 	bc.TraverseChain(func(blc Block) {
 		bc.Height += 1
-		if hex.EncodeToString(blc.Hash) != GenesisBlockHash {
+		if hex.EncodeToString(blc.Hash) != GetBlockchainSettings().GenesisHash {
 			if !ValidateBlock(blc) {
-				log.Fatal("Block" + hex.EncodeToString(blc.Hash) + " couldn't be verified")
+				log.Fatal("Block " + hex.EncodeToString(blc.Hash) + " couldn't be verified")
 			}
 		}
 	})

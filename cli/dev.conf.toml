@@ -4,6 +4,11 @@ data_dir = "filefilego_data"
 mine = false
 mine_keypath = ""
 mine_pass = ""
+full_text = true
+full_text_result_count = 100
+binlayer = false
+binlayer_dir = ""
+binlayer_token = ""
 
 [host]
 

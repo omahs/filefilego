@@ -8,12 +8,12 @@ import (
 	"github.com/filefilego/filefilego/common/hexutil"
 )
 
-// AccountAPI
+// AccountAPI represents account service
 type AccountAPI struct {
 	Node *Node
 }
 
-// NewAccountAPI
+// NewAccountAPI returns an instance of account service
 func NewAccountAPI(node *Node) *AccountAPI {
 	return &AccountAPI{Node: node}
 }
@@ -32,18 +32,18 @@ func (api *AccountAPI) Unlock(ctx context.Context, address string, passphrase st
 }
 
 // Lock an account
-func (api *AccountAPI) Lock(ctx context.Context, access_token string, address string) (string, error) {
+func (api *AccountAPI) Lock(ctx context.Context, accessToken string, address string) (string, error) {
 	if !hexutil.Has0xPrefix(address) {
 		address = "0x" + address
 	}
-	msg, err := api.Node.Keystore.LockAccount(address, access_token)
+	msg, err := api.Node.Keystore.LockAccount(address, accessToken)
 	if err != nil {
 		return "", err
 	}
 	return msg, nil
 }
 
-// AccountStateResult ...
+// AccountStateResult represents the metadata of an account
 type AccountStateResult struct {
 	Balance    string `json:"balance"`
 	BalanceHex string `json:"balance_hex"`

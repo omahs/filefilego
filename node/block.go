@@ -9,7 +9,7 @@ import (
 
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/keystore"
-	proto "github.com/golang/protobuf/proto"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // Serialize serializes the block
@@ -61,7 +61,7 @@ func SealBlock(b Block, signer *keystore.Key) ([]byte, []byte) {
 	return hash[:], signedData
 }
 
-// LogDetails
+// LogDetails logs the details of block
 func (b *Block) LogDetails() {
 	if b.PrevBlockHash == nil || len(b.PrevBlockHash) == 0 {
 		log.Println("Problem =========================================>>")

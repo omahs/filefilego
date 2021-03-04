@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"path"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/urfave/cli"
+	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/keystore"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -74,17 +77,21 @@ func CreateAccount(ctx *cli.Context) error {
 // CreateNodeKeys
 func CreateNodeKeys(ctx *cli.Context) error {
 	cfg := GetConfig(ctx)
+	finalDestination := "node_identity.json"
+
+	if common.FileExists(path.Join(cfg.Global.KeystoreDir, finalDestination)) {
+		return errors.New("Node identity file already exists at: " + path.Join(cfg.Global.KeystoreDir, finalDestination) + " Please delete manually if you want to create a new node identity key")
+	}
 
 	ks := keystore.NewKeyStore(cfg.Global.KeystoreDir)
 	if len(ctx.Args()) == 0 {
 		log.Fatal("Passphrase is required")
 	}
 	filename := ks.NewAccount(ctx.Args()[0])
-	finalDestination := "node_identity.json"
-	err := os.Rename(filename, cfg.Global.KeystoreDir+"/"+finalDestination)
+	err := os.Rename(filename, path.Join(cfg.Global.KeystoreDir, finalDestination))
 	if err != nil {
 		log.Fatal("Unable to create a new node identity")
 	}
-	log.Println("Your node identity is located at: ", cfg.Global.KeystoreDir+"/"+finalDestination)
+	log.Println("Your node identity is located at: ", path.Join(cfg.Global.KeystoreDir, finalDestination))
 	return nil
 }

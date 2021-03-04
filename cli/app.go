@@ -6,19 +6,21 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"path"
 	"sort"
 	"strconv"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/urfave/cli"
+	"github.com/filefilego/filefilego/binlayer"
 	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
 	"github.com/filefilego/filefilego/keystore"
 	npkg "github.com/filefilego/filefilego/node"
 	"github.com/filefilego/filefilego/search"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -41,25 +43,28 @@ func init() {
 
 func entry(ctx *cli.Context) error {
 	cfg := GetConfig(ctx)
+	bn := binlayer.Engine{}
 
-	se, err := search.NewSearchEngine(cfg.Global.DataDir + "/" + "searchidx/db.bleve")
-	if err != nil {
-		log.Fatal("Unable to load or create the search index", err)
+	if cfg.Global.BinLayer {
+		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken, cfg.Global.BinLayerFeesGB)
+		bn.Enabled = true
+		log.Println("Binlayer storage is enabled")
+	} else {
+		log.Println("Binlayer storage is disabled")
 	}
 
-	// sitem := search.IndexItem{
-	// 	ID:   "idofitem",
-	// 	From: "fromme@mdsdsdsda.com",
-	// 	Body: "bleve indexing is easy",
-	// }
-
-	// se.IndexItem(sitem)
-	// res, _ := se.Search("eas")
-	se.Search("eas")
-
-	// log.Println(res)
-
-	// return nil
+	searchEngine := &search.SearchEngine{}
+	if cfg.Global.FullText {
+		se, err := search.NewSearchEngine(path.Join(cfg.Global.DataDir, "searchidx", "db.bleve"), cfg.Global.FullTextResultCount)
+		if err != nil {
+			log.Fatal("Unable to load or create the search index", err)
+		}
+		searchEngine = &se
+		searchEngine.Enabled = true
+		log.Println("Full-text indexing is enabled")
+	} else {
+		log.Println("Full-text indexing is disabled")
+	}
 
 	// check for node identity file first
 	key := &keystore.Key{}
@@ -89,9 +94,16 @@ func entry(ctx *cli.Context) error {
 	ks := keystore.NewKeyStore(cfg.Global.KeystoreDir)
 
 	listenString := "/ip4/" + cfg.P2P.ListenAddress + "/tcp/" + strconv.Itoa(cfg.P2P.ListenPort)
-	node, err := npkg.NewNode(ctx2, listenString, key, ks)
+	node, err := npkg.NewNode(ctx2, listenString, key, ks, searchEngine, &bn)
 	if err != nil {
 		return err
+	}
+
+	// how can this node be reached
+	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
+	for _, lid := range node.Host.Addrs() {
+		fulladdr := lid.Encapsulate(hostAddr)
+		log.Println("Can be reached on: ", fulladdr.String())
 	}
 
 	if cfg.Global.Mine {
@@ -106,7 +118,8 @@ func entry(ctx *cli.Context) error {
 	node.BlockChain = npkg.CreateOrLoadBlockchain(&node, cfg.Global.DataDir, cfg.Global.MineKeypath, cfg.Global.MinePass)
 
 	// register the services
-	node.BlockService = npkg.NewBlockService(&node)
+	node.BlockProtocol = npkg.NewBlockProtocol(&node)
+	node.DataQueryProtocol = npkg.NewDataQueryProtocol(&node)
 
 	log.Println("Blockchain height: ", node.BlockChain.GetHeight())
 	block, _ := node.BlockChain.GetBlockByHeight(node.BlockChain.GetHeight())
@@ -115,14 +128,8 @@ func entry(ctx *cli.Context) error {
 	// node.BlockChain.LoadToMemPoolFromDB()
 
 	// apply pubsub gossip to listen for incoming blocks and transactions
-	node.ApplyGossip(ctx2)
+	node.ApplyGossip(ctx2, cfg.P2P.GossipMaxMessageSize)
 
-	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
-
-	for _, lid := range node.Host.Addrs() {
-		fulladdr := lid.Encapsulate(hostAddr)
-		log.Println("Listening on: ", fulladdr)
-	}
 	bootnodesCli := cfg.P2P.Bootstraper.Nodes
 	if len(bootnodesCli) > 0 {
 		err = node.Bootstrap(ctx2, bootnodesCli)
@@ -132,9 +139,11 @@ func entry(ctx *cli.Context) error {
 	}
 
 	node.Advertise(ctx2)
-	err = node.FindPeers(ctx2)
+	discoveredPeers, err := node.FindPeers(ctx2)
 	if err != nil {
 		log.Warn("Unable to find peers", err)
+	} else {
+		log.Info("Discovered ", len(discoveredPeers), " peers")
 	}
 
 	log.Println("Peerstore count ", node.Peers().Len()-1)
@@ -148,8 +157,10 @@ func entry(ctx *cli.Context) error {
 		}
 	}
 
-	log.Println("Syncing node with other peers")
-	node.Sync(ctx2)
+	if !cfg.Global.Mine {
+		log.Println("Syncing node with other peers")
+		node.Sync(ctx2)
+	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

@@ -6,17 +6,18 @@ import (
 	"github.com/filefilego/filefilego/common/hexutil"
 )
 
-// TransactionAPI
+// BlockAPI represents a block service
 type BlockAPI struct {
 	Node *Node
 }
 
-// NewBlockAPI
+// NewBlockAPI returns an instance of block service
 func NewBlockAPI(node *Node) *BlockAPI {
 	return &BlockAPI{Node: node}
 }
 
-type BlockJson struct {
+// BlockJSON represents a block in json format
+type BlockJSON struct {
 	Timestamp     int64  `json:"timestamp"`
 	Data          string `json:"data"`
 	PrevBlockHash string `json:"prev_block_hash"`
@@ -24,8 +25,8 @@ type BlockJson struct {
 	Signature     string `json:"signature"`
 }
 
-// GetByNumber
-func (api *BlockAPI) GetByNumber(ctx context.Context, heightHex string) (b BlockJson, err error) {
+// GetByNumber returns a block by height
+func (api *BlockAPI) GetByNumber(ctx context.Context, heightHex string) (b BlockJSON, err error) {
 	h, err := hexutil.DecodeUint64(heightHex)
 	if err != nil {
 		return b, err
@@ -34,7 +35,7 @@ func (api *BlockAPI) GetByNumber(ctx context.Context, heightHex string) (b Block
 	if err != nil {
 		return b, err
 	}
-	b = BlockJson{
+	b = BlockJSON{
 		Timestamp:     block.Timestamp,
 		Data:          hexutil.Encode(block.Data),
 		Hash:          hexutil.Encode(block.Hash),
@@ -44,13 +45,13 @@ func (api *BlockAPI) GetByNumber(ctx context.Context, heightHex string) (b Block
 	return b, nil
 }
 
-// GetByHash
-func (api *BlockAPI) GetByHash(ctx context.Context, hash string) (b BlockJson, err error) {
+// GetByHash returns a block by hash
+func (api *BlockAPI) GetByHash(ctx context.Context, hash string) (b BlockJSON, err error) {
 	block, err := api.Node.BlockChain.GetBlockByHash(hash)
 	if err != nil {
 		return b, err
 	}
-	b = BlockJson{
+	b = BlockJSON{
 		Timestamp:     block.Timestamp,
 		Data:          hexutil.Encode(block.Data),
 		Hash:          hexutil.Encode(block.Hash),
@@ -61,8 +62,8 @@ func (api *BlockAPI) GetByHash(ctx context.Context, hash string) (b BlockJson, e
 	return b, nil
 }
 
-// GetTransactionsByNumber
-func (api *BlockAPI) GetTransactionsByNumber(ctx context.Context, heightHex string) (b []TransactionJson, err error) {
+// GetTransactionsByNumber return transactions of a block
+func (api *BlockAPI) GetTransactionsByNumber(ctx context.Context, heightHex string) (b []TransactionJSON, err error) {
 	h, err := hexutil.DecodeUint64(heightHex)
 	if err != nil {
 		return b, err
@@ -72,7 +73,7 @@ func (api *BlockAPI) GetTransactionsByNumber(ctx context.Context, heightHex stri
 		return b, err
 	}
 	for _, v := range block.Transactions {
-		t := TransactionJson{
+		t := TransactionJSON{
 			Hash:            hexutil.Encode(v.Hash),
 			Data:            hexutil.Encode(v.Data),
 			From:            v.From,
@@ -88,15 +89,15 @@ func (api *BlockAPI) GetTransactionsByNumber(ctx context.Context, heightHex stri
 	return b, nil
 }
 
-// GetTransactionsByHash
-func (api *BlockAPI) GetTransactionsByHash(ctx context.Context, hash string) (b []TransactionJson, err error) {
+// GetTransactionsByHash return transactions by block hash
+func (api *BlockAPI) GetTransactionsByHash(ctx context.Context, hash string) (b []TransactionJSON, err error) {
 	block, err := api.Node.BlockChain.GetBlockByHash(hash)
 	if err != nil {
 		return b, err
 	}
 
 	for _, v := range block.Transactions {
-		t := TransactionJson{
+		t := TransactionJSON{
 			Hash:            hexutil.Encode(v.Hash),
 			Data:            hexutil.Encode(v.Data),
 			From:            v.From,
@@ -110,5 +111,13 @@ func (api *BlockAPI) GetTransactionsByHash(ctx context.Context, hash string) (b 
 		b = append(b, t)
 	}
 
+	return b, nil
+}
+
+// Pool return block pool
+func (api *BlockAPI) Pool(ctx context.Context) (b []string, err error) {
+	for _, v := range api.Node.BlockChain.BlockPool {
+		b = append(b, hexutil.Encode(v.Hash))
+	}
 	return b, nil
 }

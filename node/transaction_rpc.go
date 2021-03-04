@@ -8,24 +8,26 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	proto "github.com/golang/protobuf/proto"
 	"github.com/filefilego/filefilego/common/hexutil"
+	proto "google.golang.org/protobuf/proto"
 )
 
 var (
-	MAX_TX_DATA_SIZE = 1024 * 300
+	// MaxTxDataSize represents the max size of a tx
+	MaxTxDataSize = 1024 * 300
 )
 
-// TransactionAPI
+// TransactionAPI represents the transaction service
 type TransactionAPI struct {
 	Node *Node
 }
 
-// NewTransactionAPI
+// NewTransactionAPI returns a new service
 func NewTransactionAPI(node *Node) *TransactionAPI {
 	return &TransactionAPI{Node: node}
 }
 
+// RawTransaction represents a json trnasaction
 type RawTransaction struct {
 	Hash            string `json:"Hash,omitempty"`
 	PubKey          string `json:"PubKey,omitempty"`
@@ -35,6 +37,7 @@ type RawTransaction struct {
 	To              string `json:"To,omitempty"`
 	Value           string `json:"Value,omitempty"`
 	TransactionFees string `json:"TransactionFees,omitempty"`
+	Chain           string `json:"Chain,omitempty"`
 	Signature       string `json:"Signature,omitempty"`
 }
 
@@ -63,8 +66,12 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (s
 		return "", err
 	}
 
-	log.Println("len rawTxSig", len(rawTxSig), hexutil.Encode(rawTxSig))
+	chainID, err := hexutil.Decode(parsedTx.Chain)
+	if err != nil {
+		return "", err
+	}
 
+	tmpTx.Chain = chainID
 	tmpTx.Hash = rawTxHash
 	tmpTx.PubKey = parsedTx.PubKey
 	tmpTx.Nounce = parsedTx.Nounce
@@ -88,7 +95,7 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (s
 		return "", errors.New("fields size too big")
 	}
 
-	if len(tmpTx.Data) > MAX_TX_DATA_SIZE { // 300 KB
+	if len(tmpTx.Data) > MaxTxDataSize { // 300 KB
 		return "", errors.New("\"data\" field is too big")
 	}
 
@@ -153,17 +160,17 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, tx string) (s
 }
 
 // SendTransaction sends a transaction to the network
-func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token string, to string, value string, txfees string, nounce string, data string) (string, error) {
+func (api *TransactionAPI) SendTransaction(ctx context.Context, accessToken string, to string, value string, txFees string, nounce string, data string) (string, error) {
 
-	if len(to) > 100 || len(value) > 500 || len(txfees) > 500 || len(nounce) > 100 {
+	if len(to) > 100 || len(value) > 500 || len(txFees) > 500 || len(nounce) > 100 {
 		return "", errors.New("fields size too big")
 	}
 
-	if len(data) > MAX_TX_DATA_SIZE { // 300 KB
+	if len(data) > MaxTxDataSize { // 300 KB
 		return "", errors.New("\"data\" field is too big")
 	}
 
-	if access_token == "" {
+	if accessToken == "" {
 		return "", errors.New("\"access_token\" is a required field")
 	}
 
@@ -182,7 +189,7 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token str
 		return "", errors.New("Value is negative")
 	}
 
-	txf, err := hexutil.DecodeBig(txfees)
+	txf, err := hexutil.DecodeBig(txFees)
 	if err != nil {
 		txf, _ = new(big.Int).SetString("0", 10)
 	}
@@ -197,7 +204,7 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token str
 	}
 
 	// check if authorized token
-	ok, retAddr, unlockedAccount, err := api.Node.Keystore.Authorized(access_token)
+	ok, retAddr, unlockedAccount, err := api.Node.Keystore.Authorized(accessToken)
 	if err != nil {
 		return "", err
 	}
@@ -215,6 +222,7 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token str
 
 		if hasBalance {
 			tx := Transaction{
+				Chain:           GetBlockchainSettings().Chain,
 				Data:            []byte(data),
 				From:            "0x" + unlockedAccount.Key.Address,
 				Nounce:          hexutil.EncodeBig(addrNounce),
@@ -253,7 +261,8 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, access_token str
 	return "", errors.New("Unable to send transaction. Check your balance")
 }
 
-type TransactionJson struct {
+// TransactionJSON for receipt payload
+type TransactionJSON struct {
 	Hash            string `json:"hash"`
 	PubKey          string `json:"pub_key"`
 	Nounce          string `json:"nounce"`
@@ -265,10 +274,10 @@ type TransactionJson struct {
 	Signature       string `json:"signature"`
 }
 
-// Pool
-func (api *TransactionAPI) Pool(ctx context.Context) (txs []TransactionJson, err error) {
+// Pool returns the mempool txs
+func (api *TransactionAPI) Pool(ctx context.Context) (txs []TransactionJSON, err error) {
 	for _, v := range api.Node.BlockChain.MemPool {
-		t := TransactionJson{
+		t := TransactionJSON{
 			Data:            hexutil.Encode(v.Data),
 			From:            v.From,
 			Hash:            hexutil.Encode(v.Hash),
@@ -284,19 +293,20 @@ func (api *TransactionAPI) Pool(ctx context.Context) (txs []TransactionJson, err
 	return txs, nil
 }
 
+// ReceiptPayload contains details of a tx
 type ReceiptPayload struct {
 	BlockHash   string          `json:"block_hash"`
 	BlockHeight uint64          `json:"block_height"`
-	Transaction TransactionJson `json:"transaction"`
+	Transaction TransactionJSON `json:"transaction"`
 }
 
-// Receipt
+// Receipt gets receipts of a tx
 func (api *TransactionAPI) Receipt(ctx context.Context, hash string) (txpl ReceiptPayload, err error) {
 	v, block, blockHeight, err := api.Node.BlockChain.GetTransactionByHash(hash)
 	if err != nil {
 		return txpl, err
 	}
-	tx := TransactionJson{
+	tx := TransactionJSON{
 		Data:            hexutil.Encode(v.Data),
 		From:            v.From,
 		Hash:            hexutil.Encode(v.Hash),
@@ -317,7 +327,7 @@ func (api *TransactionAPI) Receipt(ctx context.Context, hash string) (txpl Recei
 	return txpl, nil
 }
 
-// ByAddress
+// ByAddress returns transactions by an address
 func (api *TransactionAPI) ByAddress(ctx context.Context, address string) ([]TransactionTimestamp, error) {
 	txs, err := api.Node.BlockChain.GetTransactionsByAddress(address)
 	if err != nil {

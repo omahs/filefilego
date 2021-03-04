@@ -1,20 +1,11 @@
 syntax="proto3";
-
 package node;
 
 
-
-// type Block struct {
-// 	Timestamp     int64
-// 	Data          []byte
-// 	PrevBlockHash []byte
-	
-// 	Hash         []byte
-// 	Signature    []byte
-// 	Transactions []Transaction
-// }
-
-
+message AddressState {
+	bytes Balance = 1;
+	bytes Nounce  = 2;
+}
 
 message Block {
     int64 Timestamp = 1;
@@ -35,34 +26,96 @@ message Transaction {
     string Value = 7;
     string TransactionFees = 8;
     bytes Signature = 9;
+    bytes Chain = 10;
+}
+
+enum TransactionDataPayloadType {
+    NONE = 0;
+    UPDATE_BLOCKCHAIN_SETTINGS = 1;
+    CREATE_NODE = 2;
+    UPDATE_NODE = 3;
+}
+
+message TransactionDataPayload {
+    TransactionDataPayloadType Type = 1;
+    bytes Payload = 2;
+}
+
+message ChanNodeEnvelop {
+    repeated ChanNode Nodes = 1;
+}
+
+enum ChanNodeType {
+    INVALIDNODE = 0;
+    FILE = 1;
+    DIR = 2;
+    CHANNEL = 3;
+    SUBCHANNEL = 4;
+    ENTRY = 5;
+    OTHER = 6;
+}
+
+message ChanNode {
+    string Name = 1;
+    string Hash = 2;
+    string BinlayerHash = 3;
+    string Size = 4;
+    string Owner = 5;
+    bool Enabled = 6;
+    ChanNodeType NodeType = 7;
+    string ParentHash = 8;
+    string Description = 9;
+    string ContentType = 10;
+    repeated string Attributes = 11;
+    repeated string Admins = 12;
+    repeated string Posters = 13;
+    int64 Timestamp = 14;
+}
+
+message BinlayerBinaryItem {
+    string BinaryHash = 1;
+    string FilePath = 2;
+    int64 Size = 3;
+}
+
+message DataQueryRequest {
+    repeated string Nodes = 1;
+    string FromPeerAddr = 2;
+    string Hash = 3;
+    int64 Timestamp = 4;
+}
+
+message DataQueryResponse {
+    repeated string UnavailableNodes = 1;
+    string FromPeerAddr = 2;
+    string TotalFeesRequired = 3;
+    int64 Timestamp = 4;
 }
 
 message GossipPayload {
     enum GossipPayloadType {
         BLOCK = 0;
         TRANSACTION = 1;
+        DATA_QUERY_REQUEST = 2;
     }
     GossipPayloadType Type = 1;
     bytes Payload = 2;
 }
 
-enum BlockQueryType {
-    HEIGHT = 0;
-    BLOCK = 1;
+
+message NodeHeightResponse {
+    uint64 NodeHeight = 1;
 }
 
-message BlockQuery {
-    BlockQueryType Type = 1;
-    uint64 BlockNoFrom = 2;
-    uint64 BlockNoTo = 3;
+message BlockQueryRequest {
+    uint64 BlockNoFrom = 1;
+    uint64 BlockNoTo = 2;
 }
 
 message BlockQueryResponse {
     uint64 From = 1;
     uint64 To = 2;
-    // bytes Payload = 3;
     repeated Block Payload = 3;
     bool Error = 4;
-    BlockQueryType Type = 5;
-    uint64 NodeHeight = 6;
+    uint64 NodeHeight = 5;
 }
