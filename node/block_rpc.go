@@ -113,3 +113,11 @@ func (api *BlockAPI) GetTransactionsByHash(ctx context.Context, hash string) (b 
 
 	return b, nil
 }
+
+// Pool return block pool
+func (api *BlockAPI) Pool(ctx context.Context) (b []string, err error) {
+	for _, v := range api.Node.BlockChain.BlockPool {
+		b = append(b, hexutil.Encode(v.Hash))
+	}
+	return b, nil
+}

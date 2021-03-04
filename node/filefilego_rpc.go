@@ -17,15 +17,13 @@ func NewFilefilegoAPI(node *Node) *FilefilegoAPI {
 // FilefilegoResult ...
 type FilefilegoResult struct {
 	IsSyncing    bool   `json:"is_syncing"`
-	HighestBlock uint64 `json:"highest_block"`
 	CurrentBlock uint64 `json:"current_block"`
 }
 
 // Syncing checks if client is syncing
 func (api *FilefilegoAPI) Syncing(ctx context.Context) (FilefilegoResult, error) {
 	dt := FilefilegoResult{
-		IsSyncing:    api.Node.IsSyncing(),
-		HighestBlock: api.Node.BlockService.GetHeighestBlock(),
+		IsSyncing:    api.Node.GetSyncing(),
 		CurrentBlock: api.Node.BlockChain.GetHeight(),
 	}
 	return dt, nil
