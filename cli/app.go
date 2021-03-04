@@ -99,8 +99,6 @@ func entry(ctx *cli.Context) error {
 		return err
 	}
 
-	log.Println("Node multiaddress ", node.Host.Addrs()[0].String())
-
 	// how can this node be reached
 	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
 	for _, lid := range node.Host.Addrs() {
@@ -120,7 +118,7 @@ func entry(ctx *cli.Context) error {
 	node.BlockChain = npkg.CreateOrLoadBlockchain(&node, cfg.Global.DataDir, cfg.Global.MineKeypath, cfg.Global.MinePass)
 
 	// register the services
-	node.BlockService = npkg.NewBlockService(&node)
+	node.BlockProtocol = npkg.NewBlockProtocol(&node)
 	node.DataQueryProtocol = npkg.NewDataQueryProtocol(&node)
 
 	log.Println("Blockchain height: ", node.BlockChain.GetHeight())
@@ -141,9 +139,11 @@ func entry(ctx *cli.Context) error {
 	}
 
 	node.Advertise(ctx2)
-	_, err = node.FindPeers(ctx2)
+	discoveredPeers, err := node.FindPeers(ctx2)
 	if err != nil {
 		log.Warn("Unable to find peers", err)
+	} else {
+		log.Info("Discovered ", len(discoveredPeers), " peers")
 	}
 
 	log.Println("Peerstore count ", node.Peers().Len()-1)
@@ -157,8 +157,10 @@ func entry(ctx *cli.Context) error {
 		}
 	}
 
-	log.Println("Syncing node with other peers")
-	node.Sync(ctx2)
+	if !cfg.Global.Mine {
+		log.Println("Syncing node with other peers")
+		node.Sync(ctx2)
+	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

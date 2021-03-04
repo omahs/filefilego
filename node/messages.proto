@@ -102,23 +102,20 @@ message GossipPayload {
     bytes Payload = 2;
 }
 
-enum BlockQueryType {
-    HEIGHT = 0;
-    BLOCK = 1;
+
+message NodeHeightResponse {
+    uint64 NodeHeight = 1;
 }
 
-message BlockQuery {
-    BlockQueryType Type = 1;
-    uint64 BlockNoFrom = 2;
-    uint64 BlockNoTo = 3;
+message BlockQueryRequest {
+    uint64 BlockNoFrom = 1;
+    uint64 BlockNoTo = 2;
 }
 
 message BlockQueryResponse {
     uint64 From = 1;
     uint64 To = 2;
-    // bytes Payload = 3;
     repeated Block Payload = 3;
     bool Error = 4;
-    BlockQueryType Type = 5;
-    uint64 NodeHeight = 6;
+    uint64 NodeHeight = 5;
 }

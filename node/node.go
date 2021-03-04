@@ -66,7 +66,7 @@ func (c *PubSubMetadata) Broadcast(data []byte) error {
 type Node struct {
 	Host              host.Host
 	DataQueryProtocol *DataQueryProtocol
-	BlockService      *BlockService
+	BlockProtocol     *BlockProtocol
 	DHT               *dht.IpfsDHT
 	RoutingDiscovery  *discovery.RoutingDiscovery
 	Gossip            PubSubMetadata
@@ -131,31 +131,25 @@ func (n *Node) GetReachableAddr() string {
 	return ""
 }
 
-// IsSyncing
-func (n *Node) IsSyncing() bool {
-	n.IsSyncingMux.Lock()
-	sts := n.isSyncing
-	n.IsSyncingMux.Unlock()
-	return sts
-}
-
-// SetSyncing
+// SetSyncing sets current status
 func (n *Node) SetSyncing(val bool) {
 	n.IsSyncingMux.Lock()
-	if val {
-		n.isSyncing = true
-	} else {
-		for _, v := range n.BlockService.RemoteHosts {
-			n.BlockService.RemoveFromRemoteHosts(v.PeerID)
-		}
-		n.BlockService.ClearRequiredBlock()
-		n.isSyncing = false
-	}
+	n.isSyncing = val
 	n.IsSyncingMux.Unlock()
+}
+
+// GetSyncing gets current status
+func (n *Node) GetSyncing() bool {
+	n.IsSyncingMux.Lock()
+	h := n.isSyncing
+	n.IsSyncingMux.Unlock()
+	return h
 }
 
 func (n *Node) HandleGossip(msg *pubsub.Message) error {
-
+	if n.Host.ID().Pretty() == msg.ReceivedFrom.Pretty() {
+		return nil
+	}
 	gossip := GossipPayload{}
 	if err := proto.Unmarshal(msg.Data, &gossip); err != nil {
 		return err
@@ -180,9 +174,9 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 	} else if gossip.Type == GossipPayload_BLOCK {
 		// node is syncing
-		// if n.IsSyncing() {
-		// 	return nil
-		// }
+		if n.GetSyncing() {
+			return nil
+		}
 
 		// find previous hash, and append it to
 		blc, _ := DeserializeBlock(gossip.Payload)
@@ -196,9 +190,6 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 			log.Warn("Got an invalid block")
 		}
 	} else if gossip.Type == GossipPayload_DATA_QUERY_REQUEST {
-		if n.Host.ID().Pretty() == msg.ReceivedFrom.Pretty() {
-			return nil
-		}
 
 		dqr := DataQueryRequest{}
 		if err := proto.Unmarshal(gossip.Payload, &dqr); err != nil {
@@ -435,25 +426,22 @@ func (n *Node) Peers() peer.IDSlice {
 	return n.Host.Peerstore().Peers()
 }
 
-type BlockQueryResponsePayload struct {
-	BlockQueryResponse BlockQueryResponse
-	PeerID             peer.ID
-}
-
 // Sync the blockchain with other nodes
 func (n *Node) Sync(ctx context.Context) error {
-	if n.IsSyncing() {
+
+	if n.GetSyncing() {
 		return nil
 	}
 
-	// n.SetSyncing(true)
-	// produce blocks
-	currentHeight := n.BlockChain.GetHeight()
+	n.SetSyncing(true)
+	// n.BlockProtocol.ClearRemotePeers()
+
 	for _, p := range n.Peers() {
 		if n.Host.ID() != p {
-			go NewRemoteHost(ctx, n.BlockService, p, currentHeight)
+			n.BlockProtocol.AddRemotePeer(p)
 		}
 	}
+	// n.SetSyncing(false)
 	return nil
 }
 
