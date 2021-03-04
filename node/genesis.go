@@ -23,7 +23,7 @@ type BlockchainSettings struct {
 // GetBlockchainSettings returns the genesis data
 func GetBlockchainSettings() BlockchainSettings {
 	gen := BlockchainSettings{
-		BlockchainVersion:  "0.9.2",
+		BlockchainVersion:  "0.9.3",
 		Chain:              hexutil.MustDecode("0x01"), // 1 for Mainnet, anything else for other chains
 		GenesisHash:        "c2005c6ea44df4800bbd56d857bb6cb727acde486869553d212056bea38438e9",
 		BlockTimeSeconds:   10,
