@@ -896,7 +896,7 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	if len(bc.BlockPool) > 0 && !bc.Node.GetSyncing() {
 		log.Info("sync triggered. Blockpool size: ", len(bc.BlockPool))
 		bc.Node.BlockProtocol.ClearRemotePeers()
-		bc.Node.BlockChain.ClearBlockPool()
+		bc.Node.BlockChain.ClearBlockPool(false)
 		bc.Node.SetSyncing(false)
 		bc.Node.Sync(context.Background())
 	}
@@ -905,10 +905,12 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 }
 
 // ClearBlockPool clears the blockpool
-func (bc *Blockchain) ClearBlockPool() {
-	bc.BlockPoolMux.Lock()
+func (bc *Blockchain) ClearBlockPool(lock bool) {
+	if lock {
+		bc.BlockPoolMux.Lock()
+		defer bc.BlockPoolMux.Unlock()
+	}
 	bc.BlockPool = map[string]Block{} // []Block{}
-	bc.BlockPoolMux.Unlock()
 }
 
 func (bc *Blockchain) removeBlockPool(block *Block) error {

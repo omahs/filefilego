@@ -39,7 +39,6 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/rs/cors"
 )
 
@@ -123,12 +122,14 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 
 // GetReachableAddr returns full add
 func (n *Node) GetReachableAddr() string {
-	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
-	for _, lid := range n.Host.Addrs() {
-		fulladdr := lid.Encapsulate(hostAddr)
-		return fulladdr.String()
-	}
-	return ""
+
+	return n.Host.ID().Pretty()
+	// hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
+	// for _, lid := range n.Host.Addrs() {
+	// 	fulladdr := lid.Encapsulate(hostAddr)
+	// 	return fulladdr.String()
+	// }
+	// return ""
 }
 
 // SetSyncing sets current status
@@ -301,9 +302,15 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				}
 
 				ctx := context.Background()
-				pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
+				pinfo, err := n.DHT.FindPeer(ctx, peer.ID(dqr.FromPeerAddr))
+				if err != nil {
+					log.Warn("couldn't find peer ", err)
+					return nil
+				}
+
+				// pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
 				if err == nil {
-					success := n.DataQueryProtocol.SendDataQueryResponse(pinfo, &dqres)
+					success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dqres)
 					if success {
 						log.Println("Successfully sent message back to initiator peer")
 					}
