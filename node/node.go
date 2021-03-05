@@ -439,16 +439,11 @@ func (n *Node) Sync(ctx context.Context) error {
 	if n.GetSyncing() {
 		return nil
 	}
-
 	n.SetSyncing(true)
-	// n.BlockProtocol.ClearRemotePeers()
 
-	for _, p := range n.Peers() {
-		if n.Host.ID() != p {
-			n.BlockProtocol.AddRemotePeer(p)
-		}
-	}
-	// n.SetSyncing(false)
+	// do things here
+
+	n.SetSyncing(false)
 	return nil
 }
 

@@ -895,9 +895,9 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	// if blockPool len > 0, some blocks are missing so trigger a sync here
 	if len(bc.BlockPool) > 0 && !bc.Node.GetSyncing() {
 		log.Info("sync triggered. Blockpool size: ", len(bc.BlockPool))
-		bc.Node.BlockProtocol.ClearRemotePeers()
-		bc.Node.BlockChain.ClearBlockPool(false)
-		bc.Node.SetSyncing(false)
+		// bc.Node.BlockProtocol.ClearRemotePeers()
+		// bc.Node.BlockChain.ClearBlockPool(false)
+		// bc.Node.SetSyncing(false)
 		bc.Node.Sync(context.Background())
 	}
 
