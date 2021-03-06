@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"sync"
 	"time"
 
@@ -20,16 +21,25 @@ const BlockHeightProtocolID = "/ffg/blockheight/1.0.0"
 
 // RemotePeer represents a remote peer
 type RemotePeer struct {
-	Peer          peer.ID
-	BlockStream   network.Stream
-	Height        uint64
-	Disconnect    bool
-	BlockProtocol *BlockProtocol
+	Peer              peer.ID
+	BlockStream       network.Stream
+	BlockHeightStream network.Stream
+	Height            uint64
+	Disconnect        bool
+	BlockProtocol     *BlockProtocol
 }
 
-func (rp *RemotePeer) ReadStream(breq BlockQueryRequest) {
+// DownloadBlocksRange downloads a range of blocks
+func (rp *RemotePeer) DownloadBlocksRange(breq BlockQueryRequest) (bqr BlockQueryResponse, _ error) {
+	s, err := rp.BlockProtocol.Node.Host.NewStream(context.Background(), rp.Peer, BlockProtocolID)
+	if err != nil {
+		return bqr, err
+	}
+	rp.BlockStream = s
+
 	buf := []byte{}
 	defer rp.Disconn()
+	defer rp.BlockStream.Close()
 
 	future := time.Now().Add(10 * time.Second)
 	rp.BlockStream.SetDeadline(future)
@@ -38,27 +48,21 @@ func (rp *RemotePeer) ReadStream(breq BlockQueryRequest) {
 	msg := make([]byte, 8+len(bts))
 	binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
 	copy(msg[8:], bts)
-	_, err := rp.BlockStream.Write(msg)
+	_, err = rp.BlockStream.Write(msg)
 	if err != nil {
 		rp.Disconn()
-		// rp.BlockProtocol.CheckSyncingProgress()
 		rp.BlockStream.Close() // this might not be required
-		return
+		return bqr, err
 	}
 
 	for {
 		// 100 KB buffer
-
 		chunk := make([]byte, 1024*100)
 		n, err := rp.BlockStream.Read(chunk)
 
 		if err != nil {
-			// log.Warn("stream closed from remote peer: ", err)
-			// rm.Close()
-
-			return
+			return bqr, err
 		}
-		defer rp.BlockStream.Close()
 
 		if n == 0 {
 			log.Println("read 0 bytes")
@@ -75,10 +79,6 @@ func (rp *RemotePeer) ReadStream(breq BlockQueryRequest) {
 		}
 
 		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-
-		// if buffer contains the message length + content or more
-		// 1. go on and cut up to the message content
-		// 2. put back the remaining to the buffer for the next read
 		if int64(len(buf)) >= lengthPrefix+8 {
 			// bytes of the message
 			dt := buf[8 : lengthPrefix+8]
@@ -91,28 +91,93 @@ func (rp *RemotePeer) ReadStream(breq BlockQueryRequest) {
 				buf = []byte{}
 			}
 
-			bqr := BlockQueryResponse{}
 			if err := proto.Unmarshal(dt, &bqr); err != nil {
 				log.Warn("error while unmarshalling data from stream: ", err)
 
-				return
+				return bqr, err
 			}
 			rp.Height = bqr.NodeHeight
+			rp.BlockProtocol.SetHeighestBlock(rp.Height)
 
-			c <- bqr
-
-			if rp.BlockProtocol.Node.BlockChain.GetHeight() > rp.Height {
-				return
-			}
-
-			if bqr.Error {
-				return
-			}
+			return bqr, nil
 		}
 	}
 }
 
-// Disconnect
+// GetHeight gets remote peer
+func (rp *RemotePeer) GetHeight() (bqr NodeHeightResponse, _ error) {
+	s, err := rp.BlockProtocol.Node.Host.NewStream(context.Background(), rp.Peer, BlockHeightProtocolID)
+	if err != nil {
+		return bqr, err
+	}
+	rp.BlockHeightStream = s
+
+	buf := []byte{}
+	defer rp.Disconn()
+	defer rp.BlockHeightStream.Close()
+
+	future := time.Now().Add(10 * time.Second)
+	rp.BlockHeightStream.SetDeadline(future)
+
+	bts, _ := proto.Marshal(&bqr)
+	msg := make([]byte, 8+len(bts))
+	binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
+	copy(msg[8:], bts)
+	_, err = rp.BlockHeightStream.Write(msg)
+	if err != nil {
+		rp.Disconn()
+		rp.BlockHeightStream.Close() // this might not be required
+		return bqr, err
+	}
+
+	for {
+		// 100 KB buffer
+		chunk := make([]byte, 1024*100)
+		n, err := rp.BlockHeightStream.Read(chunk)
+		if err != nil {
+			return bqr, err
+		}
+
+		if n == 0 {
+			log.Println("read 0 bytes")
+			continue
+		}
+
+		// copy the content of chunk to buffer
+		cut := chunk[0:n]
+		buf = append(buf, cut...)
+
+		// we don't have the length prefix yet
+		if len(buf) < 8 {
+			continue
+		}
+
+		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
+		if int64(len(buf)) >= lengthPrefix+8 {
+			// bytes of the message
+			dt := buf[8 : lengthPrefix+8]
+
+			if int64(len(buf)) > lengthPrefix+8 {
+				// cut the buff remaining and put in back to the buf
+				buf = buf[lengthPrefix+9:]
+			} else {
+				// reset the buf
+				buf = []byte{}
+			}
+
+			if err := proto.Unmarshal(dt, &bqr); err != nil {
+				log.Warn("error while unmarshalling data from stream: ", err)
+
+				return bqr, err
+			}
+			rp.Height = bqr.NodeHeight
+			rp.BlockProtocol.SetHeighestBlock(rp.Height)
+			return bqr, nil
+		}
+	}
+}
+
+// Disconn marks as disconnected
 func (rp *RemotePeer) Disconn() {
 	rp.Disconnect = true
 }
@@ -123,12 +188,6 @@ func NewRemotePeer(n *Node, pid peer.ID) (*RemotePeer, error) {
 		Peer:          pid,
 		BlockProtocol: n.BlockProtocol,
 	}
-	s, err := n.Host.NewStream(context.Background(), rp.Peer, BlockProtocolID)
-	if err != nil {
-		rp.Disconn()
-		return rp, err
-	}
-	rp.BlockStream = s
 	return rp, nil
 }
 
@@ -139,8 +198,63 @@ type BlockProtocol struct {
 	RemotePeersMux   *sync.Mutex
 	HeighestBlock    uint64
 	HeighestBlockMux *sync.Mutex
-	TmpHeight        uint64
-	TmpHeightMux     *sync.Mutex
+	RoundIndex       int
+	RoundRobin       *sync.Mutex
+}
+
+// Reset all settings
+func (bp *BlockProtocol) Reset() {
+	bp.RoundIndex = 0
+	bp.HeighestBlock = 0
+	for i := 0; i < len(bp.RemotePeers); i++ {
+		bp.RemotePeers[i] = &RemotePeer{}
+	}
+	bp.RemotePeers = []*RemotePeer{}
+}
+
+// RemovePeer remove a peer
+func (bp *BlockProtocol) RemovePeer(rp *RemotePeer) {
+	bp.RemotePeersMux.Lock()
+	defer bp.RemotePeersMux.Unlock()
+
+	if len(bp.RemotePeers) == 0 {
+		return
+	}
+	idx := -1
+	for i, v := range bp.RemotePeers {
+		if v.Peer.String() == rp.Peer.String() {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return
+	}
+	copy(bp.RemotePeers[idx:], bp.RemotePeers[idx+1:])      // Shift a[i+1:] left one index.
+	bp.RemotePeers[len(bp.RemotePeers)-1] = &RemotePeer{}   // Erase last element (write zero value).
+	bp.RemotePeers = bp.RemotePeers[:len(bp.RemotePeers)-1] // Truncate slice.
+
+}
+
+// GetNextPeer returns next peer
+func (bp *BlockProtocol) GetNextPeer() (*RemotePeer, error) {
+	bp.RoundRobin.Lock()
+	defer bp.RoundRobin.Unlock()
+
+	if len(bp.RemotePeers) == 0 {
+		return nil, errors.New("No peers in the list")
+	}
+
+	idx := bp.RoundIndex
+	if idx >= len(bp.RemotePeers) {
+		bp.RoundIndex = 0
+		idx = 0
+	}
+
+	log.Println("GetNextPeer ", idx)
+	h := bp.RemotePeers[idx]
+	bp.RoundIndex++
+	return h, nil
 }
 
 // NewBlockProtocol returns a new instance of BlockProtocol
@@ -151,36 +265,12 @@ func NewBlockProtocol(n *Node) *BlockProtocol {
 		RemotePeersMux:   &sync.Mutex{},
 		HeighestBlock:    0,
 		HeighestBlockMux: &sync.Mutex{},
-		TmpHeight:        0,
-		TmpHeightMux:     &sync.Mutex{},
+		RoundRobin:       &sync.Mutex{},
+		RoundIndex:       0,
 	}
 	n.Host.SetStreamHandler(BlockProtocolID, bp.onBlockRequest)
 	n.Host.SetStreamHandler(BlockHeightProtocolID, bp.onBlockHeightRequest)
 	return bp
-}
-
-// GetNextTempHeight gets next seq
-func (bp *BlockProtocol) GetNextTempHeight(node uint64) (start uint64, end uint64, _ bool) {
-	bp.TmpHeightMux.Lock()
-	defer bp.TmpHeightMux.Unlock()
-
-	if node == 0 {
-		start = bp.TmpHeight + 1
-
-	} else {
-		start = node + 1
-	}
-	end = start + 5
-
-	if end > bp.Node.BlockChain.GetHeight() {
-		end = bp.Node.BlockChain.GetHeight()
-	}
-
-	if node == 0 && start > bp.Node.BlockChain.GetHeight() {
-		return start, end, false
-	}
-
-	return start, end, true
 }
 
 // SetHeighestBlock sets the heighest block
@@ -214,57 +304,6 @@ func (bp *BlockProtocol) AddRemotePeer(rp *RemotePeer) bool {
 	return true
 }
 
-// func (bp *BlockProtocol) CheckSyncingProgress() {
-// 	availableConnectedPeers := false
-// 	for _, v := range bp.RemotePeers {
-// 		if !v.Disconnect {
-// 			availableConnectedPeers = true
-// 		}
-// 	}
-
-// 	if !availableConnectedPeers {
-// 		bp.ClearRemotePeers()
-// 		bp.Node.SetSyncing(false)
-// 		log.Info("Batch of required blocks were downloaded")
-// 	}
-// }
-
-// NextQuerySequence returns the next from, to
-// func (bp *BlockProtocol) NextQuerySequence(peersHeight uint64, remotePeer *RemotePeer) (bqr BlockQueryRequest, _ error) {
-// 	bp.MaxHeightAssignedMux.Lock()
-// 	defer bp.MaxHeightAssignedMux.Unlock()
-
-// 	// check if peers height is smaller than local node
-// 	if peersHeight <= bp.Node.BlockChain.GetHeight() {
-// 		remotePeer.Disconnect = true
-// 		bp.CheckSyncingProgress()
-// 		return bqr, errors.New("Remote is behind current chain")
-// 	}
-
-// 	if peersHeight <= bp.MaxHeightAssigned {
-// 		remotePeer.Disconnect = true
-// 		bp.CheckSyncingProgress()
-// 		return bqr, errors.New("node " + remotePeer.Peer.String() + " is behind current blockchain")
-// 	}
-
-// 	if bp.MaxHeightAssigned == 0 {
-// 		bqr.BlockNoFrom = bp.Node.BlockChain.GetHeight() + 1
-// 	} else {
-// 		bqr.BlockNoFrom = bp.MaxHeightAssigned + 1
-// 	}
-
-// 	next := bqr.BlockNoFrom + 2
-
-// 	if next > peersHeight {
-// 		next = peersHeight
-// 	}
-
-// 	bp.MaxHeightAssigned = next
-// 	bqr.BlockNoTo = next
-
-// 	return bqr, nil
-// }
-
 func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
 	// constantly read bytes from the stream
 	buf := []byte{}
@@ -275,9 +314,7 @@ func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
 		n, err := s.Read(chunk)
 
 		if err != nil {
-			log.Warn("err reading from remote peer stream: ", err)
 			s.Close()
-			log.Warn("closed stream locally")
 			return
 		}
 
@@ -295,10 +332,6 @@ func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
 		}
 
 		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-
-		// if buffer contains the message length + content or more
-		// 1. go on and cut up to the message content
-		// 2. put back the remaining to the buffer for the next read
 		if int64(len(buf)) >= lengthPrefix+8 {
 			// bytes of the message
 			dt := buf[8 : lengthPrefix+8]
@@ -312,9 +345,9 @@ func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
 
 			bqr := BlockQueryRequest{}
 			if err := proto.Unmarshal(dt, &bqr); err != nil {
-				log.Warn("error while unmarshalling data from stream: ", err)
+
 				s.Close()
-				log.Warn("closed stream locally")
+
 				return
 			}
 
@@ -341,45 +374,12 @@ func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
 
 			_, err = s.Write(msg)
 			if err != nil {
-				log.Warn("error while writing to stream: ", err)
 				s.Close()
-				log.Warn("closed stream locally")
 				return
 			}
 		}
 	}
 }
-
-// AddRemotePeer adds a remote peer
-// func (bp *BlockProtocol) AddRemotePeer(peerID peer.ID) bool {
-// 	log.Println("Connecting to remote peer: ", peerID)
-// 	for _, v := range bp.RemotePeers {
-// 		if v.Peer == peerID {
-// 			return false
-// 		}
-// 	}
-// 	bp.RemotePeersMux.Lock()
-// 	rp := NewRemotePeer(bp, peerID)
-// 	go rp.Start()
-// 	bp.RemotePeers = append(bp.RemotePeers, rp)
-// 	bp.RemotePeersMux.Unlock()
-// 	return true
-// }
-
-// ClearRemotePeers clears all peers
-// func (bp *BlockProtocol) ClearRemotePeers() bool {
-// 	bp.RemotePeersMux.Lock()
-// 	for i := 0; i < len(bp.RemotePeers); i++ {
-// 		if !bp.RemotePeers[i].Disconnect {
-// 			bp.RemotePeers[i].BlockStream.Close()
-// 		}
-// 		bp.RemotePeers[i] = &RemotePeer{}
-// 	}
-// 	bp.MaxHeightAssigned = 0
-// 	bp.RemotePeers = []*RemotePeer{}
-// 	bp.RemotePeersMux.Unlock()
-// 	return true
-// }
 
 func (bp *BlockProtocol) onBlockHeightRequest(s network.Stream) {
 	tmp := NodeHeightResponse{

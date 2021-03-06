@@ -439,10 +439,83 @@ func (n *Node) Sync(ctx context.Context) error {
 	if n.GetSyncing() {
 		return nil
 	}
+
 	n.SetSyncing(true)
+	var wg sync.WaitGroup
 
-	// do things here
+	for _, p := range n.Peers() {
+		if p.String() == n.Host.ID().String() {
+			continue
+		}
+		wg.Add(1)
+		go func(p peer.ID) {
+			rh, err := NewRemotePeer(n, p)
+			if err == nil {
 
+				_, err := rh.GetHeight()
+				if err == nil {
+					n.BlockProtocol.AddRemotePeer(rh)
+				} else {
+					log.Warn(err)
+				}
+			} else {
+				log.Warn(err)
+			}
+			wg.Done()
+		}(p)
+	}
+
+	log.Println("syncing with nodes: ", len(n.BlockProtocol.RemotePeers))
+
+	// while this blockchain is behind the remote ones
+	if len(n.BlockProtocol.RemotePeers) > 0 {
+		for n.BlockChain.GetHeight() <= n.BlockProtocol.GetHeighestBlock() {
+			request := BlockQueryRequest{
+				BlockNoFrom: n.BlockChain.GetHeight() + 1,
+				BlockNoTo:   n.BlockChain.GetHeight() + 10,
+			}
+
+			// get the remote node
+			// and query for block range
+			rh, err := n.BlockProtocol.GetNextPeer()
+
+			if err != nil {
+				log.Warn("disconnected from all peers")
+				break
+			}
+
+			if request.BlockNoTo > rh.Height {
+				request.BlockNoTo = rh.Height
+			}
+
+			if n.BlockChain.GetHeight() > rh.Height {
+				n.BlockProtocol.RemovePeer(rh)
+				log.Println("current blockchain is longer than remote")
+				continue
+			}
+
+			blockRes, err := rh.DownloadBlocksRange(request)
+			if err != nil || blockRes.Error {
+				n.BlockProtocol.RemovePeer(rh)
+			}
+
+			if len(blockRes.Payload) > 0 {
+				for _, b := range blockRes.Payload {
+					log.Println("Downloaded block ", hexutil.Encode(b.Hash), " from peer: ", rh.Peer.String())
+					err := n.BlockChain.AddBlockPool(*b)
+					if err != nil {
+						log.Warn("Problem adding block to current chain ", err)
+					}
+				}
+			}
+			if blockRes.NodeHeight <= n.BlockChain.GetHeight() {
+				n.BlockProtocol.RemovePeer(rh)
+			}
+		}
+	}
+
+	n.BlockProtocol.Reset()
+	n.BlockChain.ClearBlockPool(false)
 	n.SetSyncing(false)
 	return nil
 }
