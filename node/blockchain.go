@@ -814,6 +814,8 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	}
 	last := []byte{}
 
+	log.Println("[AddBlockPool] last byte")
+
 	bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		lastbytes := b.Get([]byte("l"))
@@ -827,6 +829,8 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 		}
 		return nil
 	})
+
+	log.Println("[AddBlockPool] adding to blockpool map")
 	bc.BlockPool[hex.EncodeToString(block.Hash)] = block
 	// 2. go through all the blocks in pool
 	for {
@@ -835,6 +839,7 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 			// 3. if there is a block which matches the previous hash then insert and start the process again
 			if hex.EncodeToString(v.PrevBlockHash) == hex.EncodeToString(last) {
 				found = true
+				log.Println("[AddBlockPool] found block match")
 				err := bc.db.Update(func(tx *bolt.Tx) error {
 					b := tx.Bucket([]byte(blocksBucket))
 					err := b.Put(v.Hash, Serialize(v))
@@ -855,6 +860,7 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 
 					return nil
 				})
+				log.Println("[AddBlockPool] wrote block to disk")
 
 				if err != nil {
 					log.Fatal("Error while persisting from blockpool to db ", err)
@@ -876,12 +882,16 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 					}
 					bc.RemoveMemPool(vc)
 				}
+				log.Println("[AddBlockPool] mutated txs")
 
 				bc.AddHeight(1)
+				log.Println("[AddBlockPool] added blockchain height")
 				err = bc.removeBlockPool(&v)
+				log.Println("[AddBlockPool] removed block from blockpool")
 				if err != nil {
 					log.Warn("removeBlockPool: ", err)
 				}
+
 			}
 		}
 

@@ -89,7 +89,8 @@ message DataQueryResponse {
     repeated string UnavailableNodes = 1;
     string FromPeerAddr = 2;
     string TotalFeesRequired = 3;
-    int64 Timestamp = 4;
+    string Hash = 4;
+    int64 Timestamp = 5;
 }
 
 message GossipPayload {

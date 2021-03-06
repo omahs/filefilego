@@ -235,7 +235,18 @@ func (api *ChannelAPI) DataQuery(ctx context.Context, nodes string) (string, err
 		return "", err
 	}
 
+	api.Node.DataQueryProtocol.PutQueryHistory(dqr.Hash, dqr)
+
 	api.Node.Gossip.Broadcast(bts)
 
 	return dataHash, nil
+}
+
+// DataQueryResult returns a result of the requests
+func (api *ChannelAPI) DataQueryResult(ctx context.Context, hash string) ([]DataQueryResponse, error) {
+	res, ok := api.Node.DataQueryProtocol.GetQueryResponse(hash)
+	if !ok {
+		return res, errors.New("response not available")
+	}
+	return res, nil
 }

@@ -122,8 +122,7 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 
 // GetReachableAddr returns full add
 func (n *Node) GetReachableAddr() string {
-
-	return n.Host.ID().Pretty()
+	return peer.Encode(n.Host.ID())
 	// hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
 	// for _, lid := range n.Host.Addrs() {
 	// 	fulladdr := lid.Encapsulate(hostAddr)
@@ -196,6 +195,15 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		if err := proto.Unmarshal(gossip.Payload, &dqr); err != nil {
 			log.Warn("Got an invalid DATA_QUERY_REQUEST")
 			return err
+		}
+
+		fromPeer, err := peer.Decode(dqr.FromPeerAddr)
+		if err != nil {
+			return err
+		}
+
+		if fromPeer == n.Host.ID() {
+			return nil
 		}
 
 		if n.BinLayerEngine.Enabled {
@@ -298,11 +306,19 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 					UnavailableNodes:  unavailableNodes,
 					FromPeerAddr:      n.GetReachableAddr(),
 					TotalFeesRequired: finalAmountHex,
+					Hash:              dqr.Hash,
 					Timestamp:         time.Now().Unix(),
 				}
 
 				ctx := context.Background()
-				pinfo, err := n.DHT.FindPeer(ctx, peer.ID(dqr.FromPeerAddr))
+
+				rpdecoded, err := peer.Decode(dqr.FromPeerAddr)
+				if err != nil {
+					log.Warn(err)
+					return nil
+				}
+				log.Println("finding remote peer ", rpdecoded.String())
+				pinfo, err := n.DHT.FindPeer(ctx, rpdecoded)
 				if err != nil {
 					log.Warn("couldn't find peer ", err)
 					return nil
@@ -464,6 +480,8 @@ func (n *Node) Sync(ctx context.Context) error {
 			wg.Done()
 		}(p)
 	}
+
+	wg.Wait()
 
 	log.Println("syncing with nodes: ", len(n.BlockProtocol.RemotePeers))
 

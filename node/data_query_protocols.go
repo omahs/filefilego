@@ -2,8 +2,8 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -19,7 +19,58 @@ const DataQueryResponseID = "/ffg/dqresponse/1.0.0"
 
 // DataQueryProtocol wraps the data query protocols and handlers
 type DataQueryProtocol struct {
-	Node *Node
+	Node             *Node
+	queryHistory     map[string]DataQueryRequest
+	queryHistoryMux  *sync.Mutex
+	queryResponse    map[string][]DataQueryResponse
+	queryResponseMux *sync.Mutex
+}
+
+// PutQueryHistory put into history
+func (dqp *DataQueryProtocol) PutQueryHistory(key string, val DataQueryRequest) {
+	dqp.queryHistoryMux.Lock()
+	defer dqp.queryHistoryMux.Unlock()
+	dqp.queryHistory[key] = val
+
+}
+
+// GetQueryHistory gets a val from history
+func (dqp *DataQueryProtocol) GetQueryHistory(key string) (DataQueryRequest, bool) {
+	dqp.queryHistoryMux.Lock()
+	defer dqp.queryHistoryMux.Unlock()
+	v, ok := dqp.queryHistory[key]
+	return v, ok
+
+}
+
+// PutQueryResponse put into responses
+func (dqp *DataQueryProtocol) PutQueryResponse(key string, val DataQueryResponse) {
+	dqp.queryResponseMux.Lock()
+	defer dqp.queryResponseMux.Unlock()
+	tmp, _ := dqp.queryResponse[key]
+	idx := -1
+	for i, v := range tmp {
+		if v.FromPeerAddr == val.FromPeerAddr {
+			idx = i
+		}
+	}
+	// if answer from same nodes, just replace
+	if idx > -1 {
+		tmp[idx] = val
+
+	} else {
+		tmp = append(tmp, val)
+	}
+	dqp.queryResponse[key] = tmp
+
+}
+
+// GetQueryResponse gets a val from responses
+func (dqp *DataQueryProtocol) GetQueryResponse(key string) ([]DataQueryResponse, bool) {
+	dqp.queryResponseMux.Lock()
+	defer dqp.queryResponseMux.Unlock()
+	v, ok := dqp.queryResponse[key]
+	return v, ok
 }
 
 // func (dqp *DataQueryProtocol) onDataQueryRequest(s network.Stream) {
@@ -54,13 +105,23 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 		return
 	}
 
-	fmt.Println("DataQueryResponse came back to this node: ", tmp)
+	// check if this node has requested
+	_, ok := dqp.GetQueryHistory(tmp.Hash)
+	if !ok {
+		return
+	}
+
+	dqp.PutQueryResponse(tmp.Hash, tmp)
 }
 
 // NewDataQueryProtocol returns a new instance and registers the handlers
 func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
 	p := &DataQueryProtocol{
-		Node: n,
+		Node:             n,
+		queryHistoryMux:  &sync.Mutex{},
+		queryResponseMux: &sync.Mutex{},
+		queryHistory:     make(map[string]DataQueryRequest),
+		queryResponse:    make(map[string][]DataQueryResponse),
 	}
 	// n.Host.SetStreamHandler(DataQueryRequestID, p.onDataQueryRequest)
 	n.Host.SetStreamHandler(DataQueryResponseID, p.onDataQueryResponse)
