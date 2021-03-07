@@ -37,8 +37,20 @@ func RestorePrivateKey(privateKey []byte) (crypto.PrivKey, error) {
 	return crypto.UnmarshalSecp256k1PrivateKey(privateKey)
 }
 
-// RestorePubKey unmarshals the pubKey
-func RestorePubKey(pubKey []byte) (crypto.PubKey, error) {
+// MarshalPublicKey marshals a pubkey
+func MarshalPublicKey(k crypto.PubKey) ([]byte, error) {
+	bts, err := crypto.MarshalPublicKey(k)
+	return bts, err
+}
+
+// UnmarshalPublicKey unmarshals a pubkey
+func UnmarshalPublicKey(pubKey []byte) (crypto.PubKey, error) {
+	k, err := crypto.UnmarshalPublicKey(pubKey)
+	return k, err
+}
+
+// UnmarshalSecp256k1PubKey unmarshals a secp256k1 pubKey
+func UnmarshalSecp256k1PubKey(pubKey []byte) (crypto.PubKey, error) {
 	return crypto.UnmarshalSecp256k1PublicKey(pubKey)
 }
 

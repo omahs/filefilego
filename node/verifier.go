@@ -24,7 +24,7 @@ var (
 func init() {
 	for _, v := range GetBlockchainSettings().Verifiers {
 		pubBytesFromHex, _ := hexutil.Decode(v.PublicKey)
-		newPub, err := ffgcrypto.RestorePubKey(pubBytesFromHex)
+		newPub, err := ffgcrypto.UnmarshalSecp256k1PubKey(pubBytesFromHex)
 		if err != nil {
 			log.Fatal("Unable to load verifier list")
 		}

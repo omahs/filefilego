@@ -120,6 +120,44 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 	return node, nil
 }
 
+// SignData signs data with nodes private key
+func (n *Node) SignData(data []byte) ([]byte, error) {
+	localKey := n.Host.Peerstore().PrivKey(n.Host.ID())
+	res, err := localKey.Sign(data)
+	return res, err
+}
+
+// VerifyData given a pubkey and signature + data returns the verification result
+func (n *Node) VerifyData(data []byte, signature []byte, peerID peer.ID, pubKeyData []byte) bool {
+	key, err := crypto.UnmarshalPublicKey(pubKeyData)
+	if err != nil {
+		log.Warn(err, "Failed to extract key from message key data")
+		return false
+	}
+
+	// extract node id from the provided public key
+	idFromKey, err := peer.IDFromPublicKey(key)
+
+	if err != nil {
+		log.Warn(err, "Failed to extract peer id from public key")
+		return false
+	}
+
+	// verify that message author node id matches the provided node public key
+	if idFromKey != peerID {
+		log.Warn(err, "Node id and provided public key mismatch")
+		return false
+	}
+
+	res, err := key.Verify(data, signature)
+	if err != nil {
+		log.Warn(err, "Error authenticating data")
+		return false
+	}
+
+	return res
+}
+
 // GetReachableAddr returns full add
 func (n *Node) GetReachableAddr() string {
 	return peer.Encode(n.Host.ID())
@@ -301,13 +339,36 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				factor := gbInBytes.Div(gbInBytes, tsBig)
 				finalAmount := feesGB.Div(feesGB, factor)
 				finalAmountHex := hexutil.EncodeBig(finalAmount)
+				pubKeyBytes, err := crypto.MarshalPublicKey(n.Host.Peerstore().PubKey(n.Host.ID()))
+				if err != nil {
+					log.Warn("Unable to get public key bytes")
+					return nil
+				}
 
 				dqres := DataQueryResponse{
 					UnavailableNodes:  unavailableNodes,
 					FromPeerAddr:      n.GetReachableAddr(),
 					TotalFeesRequired: finalAmountHex,
 					Hash:              dqr.Hash,
+					PubKey:            pubKeyBytes,
 					Timestamp:         time.Now().Unix(),
+				}
+
+				bts, err := proto.Marshal(&dqres)
+				if err != nil {
+					log.Warn(err)
+					return nil
+				}
+
+				signedBits, err := n.SignData(bts)
+				if err != nil {
+					log.Warn(err)
+					return nil
+				}
+
+				dtqEnvelope := DataQueryResponseEnvelope{
+					Signature: signedBits,
+					Payload:   bts,
 				}
 
 				ctx := context.Background()
@@ -326,7 +387,7 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 				// pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
 				if err == nil {
-					success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dqres)
+					success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dtqEnvelope)
 					if success {
 						log.Println("Successfully sent message back to initiator peer")
 					}
@@ -334,7 +395,6 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 					log.Warn(err)
 				}
 
-				log.Println(err, "total amount ", finalAmountHex, " items ", totalCountItems, dqres)
 			}
 
 			// s, err := n.Host.NewStream(ctx, p, DataQueryServiceID)

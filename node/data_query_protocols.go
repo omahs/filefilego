@@ -97,11 +97,25 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 		return
 	}
 
-	tmp := DataQueryResponse{}
-	err = proto.Unmarshal(buf, &tmp)
+	env := DataQueryResponseEnvelope{}
+	err = proto.Unmarshal(buf, &env)
 	if err != nil {
 		s.Reset()
 		log.Warn(err)
+		return
+	}
+
+	tmp := DataQueryResponse{}
+	err = proto.Unmarshal(env.Payload, &tmp)
+	if err != nil {
+		s.Reset()
+		log.Warn(err)
+		return
+	}
+
+	// verify response
+	if !dqp.Node.VerifyData(env.Payload, env.Signature, s.Conn().RemotePeer(), tmp.PubKey) {
+		log.Warn("couldn't verify incoming data")
 		return
 	}
 
@@ -129,7 +143,7 @@ func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
 }
 
 // SendDataQueryResponse sends back the response to initiator
-func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponse) bool {
+func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponseEnvelope) bool {
 	s, err := dqp.Node.Host.NewStream(context.Background(), addrInfo.ID, DataQueryResponseID)
 	if err != nil {
 		log.Warn(err)

@@ -750,7 +750,7 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 	}
 
 	pubBytesFromHex, _ := hexutil.Decode(transaction.PubKey)
-	newPub, _ := crypto.RestorePubKey(pubBytesFromHex)
+	newPub, _ := crypto.UnmarshalSecp256k1PubKey(pubBytesFromHex)
 	ok, err := newPub.Verify(transaction.Hash, transaction.Signature)
 	if err != nil {
 		return false, err

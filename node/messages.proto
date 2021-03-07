@@ -90,7 +90,13 @@ message DataQueryResponse {
     string FromPeerAddr = 2;
     string TotalFeesRequired = 3;
     string Hash = 4;
-    int64 Timestamp = 5;
+    bytes PubKey = 5;
+    int64 Timestamp = 6;
+}
+
+message DataQueryResponseEnvelope {
+    bytes Signature = 1;
+    bytes Payload = 2;
 }
 
 message GossipPayload {
