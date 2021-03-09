@@ -103,9 +103,9 @@ In this section, the complete life cycle of a data transfer verification is demo
 
 
 3. Verifier(`v1`) communicates with the participating nodes and generate a challenge for the node which hosts the data(`node_2`). The challenge consists of the following procedures:
-i) `node_2` should create a Merkle tree that matches the original Merkle root of `data_x` uploaded in the first place.
-ii) `v1` decides the **order** and the **number of blocks/data** ranges to be sent to `node_1` by `node_2`. We don't want to reveal the order of blocks yet to `node_1` until the final step which is described later.  
-iii) `v1` asks `node_2` for a fixed range of data, which will be encrypted using a random key `k1` as `data_enc` by `v1` and sent to `node_1`.
+* `node_2` should create a Merkle tree that matches the original Merkle root of `data_x` uploaded in the first place.
+* `v1` decides the **order** and the **number of blocks/data** ranges to be sent to `node_1` by `node_2`. We don't want to reveal the order of blocks yet to `node_1` until the final step which is described later.  
+* `v1` asks `node_2` for a fixed range of data, which will be encrypted using a random key `k1` as `data_enc` by `v1` and sent to `node_1`.
 
 At this stage, `node_1` has some `data_z`, plus some `data_enc` but has no knowledge on how to reassemble them in order to get the original file. Now, `v1` can validate the integrity of the data sent to `node_1` and if they match the original Merkle tree's identity, then the decryption key `k1` is sent to `node_1`. The order of the blocks will also be sent, so `node_1` can put all the parts together to reassemble the data. The final step is to release the fees to `node_2` by `v1`.
 ```
