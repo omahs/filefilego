@@ -16,6 +16,7 @@ import (
 	"github.com/filefilego/filefilego/binlayer"
 	"github.com/filefilego/filefilego/common"
 	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/crypto"
 	"github.com/filefilego/filefilego/keystore"
 	npkg "github.com/filefilego/filefilego/node"
 	"github.com/filefilego/filefilego/search"
@@ -43,28 +44,6 @@ func init() {
 
 func entry(ctx *cli.Context) error {
 	cfg := GetConfig(ctx)
-	bn := binlayer.Engine{}
-
-	if cfg.Global.BinLayer {
-		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken, cfg.Global.BinLayerFeesGB)
-		bn.Enabled = true
-		log.Println("Binlayer storage is enabled")
-	} else {
-		log.Println("Binlayer storage is disabled")
-	}
-
-	searchEngine := &search.SearchEngine{}
-	if cfg.Global.FullText {
-		se, err := search.NewSearchEngine(path.Join(cfg.Global.DataDir, "searchidx", "db.bleve"), cfg.Global.FullTextResultCount)
-		if err != nil {
-			log.Fatal("Unable to load or create the search index", err)
-		}
-		searchEngine = &se
-		searchEngine.Enabled = true
-		log.Println("Full-text indexing is enabled")
-	} else {
-		log.Println("Full-text indexing is disabled")
-	}
 
 	// check for node identity file first
 	key := &keystore.Key{}
@@ -89,14 +68,62 @@ func entry(ctx *cli.Context) error {
 
 	}
 
+	bn := binlayer.Engine{}
+
+	if cfg.Global.BinLayer {
+		bn, _ = binlayer.NewEngine(cfg.Global.BinLayerDir, cfg.Global.DataDir, cfg.Global.BinLayerToken, cfg.Global.BinLayerFeesGB)
+		bn.Enabled = true
+		log.Println("Binlayer storage is enabled")
+	} else {
+		log.Println("Binlayer storage is disabled")
+	}
+
+	searchEngine := &search.SearchEngine{}
+	if cfg.Global.FullText {
+		se, err := search.NewSearchEngine(path.Join(cfg.Global.DataDir, "searchidx", "db.bleve"), cfg.Global.FullTextResultCount)
+		if err != nil {
+			log.Fatal("Unable to load or create the search index", err)
+		}
+		searchEngine = &se
+		searchEngine.Enabled = true
+		log.Println("Full-text indexing is enabled")
+	} else {
+		log.Println("Full-text indexing is disabled")
+	}
+
 	ctx2 := context.Background()
-
 	ks := keystore.NewKeyStore(cfg.Global.KeystoreDir)
-
 	listenString := "/ip4/" + cfg.P2P.ListenAddress + "/tcp/" + strconv.Itoa(cfg.P2P.ListenPort)
 	node, err := npkg.NewNode(ctx2, listenString, key, ks, searchEngine, &bn)
 	if err != nil {
 		return err
+	}
+
+	if cfg.Global.DataVerifier {
+		// check if verifier
+		currentNodePubKey, err := node.Host.ID().ExtractPublicKey()
+		currentNodePubKeyHex, _ := crypto.PublicKeyHex(currentNodePubKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		isVerifier := false
+
+		for _, v := range npkg.GetBlockchainSettings().Verifiers {
+			if v.PublicKey == currentNodePubKeyHex {
+				isVerifier = true
+				break
+			}
+		}
+
+		if !isVerifier {
+			log.Fatal("Only verifier in the genesis are allowed to verify")
+		}
+
+		log.Println("Data verification is enabled")
+
+		// register the and start protocol + handlers
+		node.DataVerifierProtocol = npkg.NewDataVerifierProtocol(&node)
 	}
 
 	// how can this node be reached
@@ -114,6 +141,22 @@ func entry(ctx *cli.Context) error {
 			log.Fatal("Couldn't load miner's private key file")
 		}
 	}
+
+	pbkey, err := crypto.PublicKeyHex(node.Host.Peerstore().PubKey(node.Host.ID()))
+	if err != nil {
+		log.Fatal("Unable to get public key of node")
+	}
+
+	log.Println("nodes pubkey: ", pbkey)
+	rawBts, err := hexutil.Decode(pbkey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("nodes wallet address: ", crypto.RawPublicToAddress(rawBts))
+
+	// we can retrive the pubkey from raw hex
+	// restoredPbKey, err := crypto.PublicKeyFromRawHex(pbkey)
 
 	node.BlockChain = npkg.CreateOrLoadBlockchain(&node, cfg.Global.DataDir, cfg.Global.MineKeypath, cfg.Global.MinePass)
 
@@ -138,8 +181,8 @@ func entry(ctx *cli.Context) error {
 		}
 	}
 
-	node.Advertise(ctx2)
-	discoveredPeers, err := node.FindPeers(ctx2)
+	node.AdvertiseRendezvous(ctx2)
+	discoveredPeers, err := node.FindRendezvousPeers(ctx2)
 	if err != nil {
 		log.Warn("Unable to find peers", err)
 	} else {
@@ -181,5 +224,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
 }

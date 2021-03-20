@@ -27,6 +27,7 @@ func DefaultConfig() *GlobalConfig {
 			BinLayerDir:         "",
 			BinLayerToken:       "",
 			BinLayerFeesGB:      "1000000000000000000", // 1 Zaran
+			DataVerifier:        false,
 		},
 		Host: Host{},
 		RPC: RPC{
@@ -127,6 +128,10 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 
 	if ctx.GlobalIsSet(BinLayerFeesGB.Name) {
 		cfg.Global.BinLayerFeesGB = ctx.GlobalString(BinLayerFeesGB.Name)
+	}
+
+	if ctx.GlobalIsSet(DataVerifier.Name) {
+		cfg.Global.DataVerifier = ctx.GlobalBool(DataVerifier.Name)
 	}
 
 	// Host

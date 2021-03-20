@@ -34,8 +34,8 @@ import (
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	mplex "github.com/libp2p/go-libp2p-mplex"
+	noise "github.com/libp2p/go-libp2p-noise"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	secio "github.com/libp2p/go-libp2p-secio"
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
@@ -63,32 +63,36 @@ func (c *PubSubMetadata) Broadcast(data []byte) error {
 
 // Node represents all the node functionalities
 type Node struct {
-	Host              host.Host
-	DataQueryProtocol *DataQueryProtocol
-	BlockProtocol     *BlockProtocol
-	DHT               *dht.IpfsDHT
-	RoutingDiscovery  *discovery.RoutingDiscovery
-	Gossip            PubSubMetadata
-	Keystore          *keystore.KeyStore
-	BlockChain        *Blockchain
-	isSyncing         bool
-	IsSyncingMux      *sync.Mutex
-	SearchEngine      *search.SearchEngine
-	BinLayerEngine    *binlayer.Engine
+	Host                 host.Host
+	DataQueryProtocol    *DataQueryProtocol
+	DataVerifierProtocol *DataVerifierProtocol
+	BlockProtocol        *BlockProtocol
+	DHT                  *dht.IpfsDHT
+	RoutingDiscovery     *discovery.RoutingDiscovery
+	Gossip               PubSubMetadata
+	Keystore             *keystore.KeyStore
+	BlockChain           *Blockchain
+	isSyncing            bool
+	IsSyncingMux         *sync.Mutex
+	SearchEngine         *search.SearchEngine
+	BinLayerEngine       *binlayer.Engine
 }
 
 func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine, bl *binlayer.Engine) (Node, error) {
 	node := Node{
-		IsSyncingMux:   &sync.Mutex{},
-		SearchEngine:   se,
-		BinLayerEngine: bl,
+		DataQueryProtocol:    &DataQueryProtocol{},
+		BlockProtocol:        &BlockProtocol{},
+		DataVerifierProtocol: &DataVerifierProtocol{Enabled: false},
+		IsSyncingMux:         &sync.Mutex{},
+		SearchEngine:         se,
+		BinLayerEngine:       bl,
 	}
 	host, err := libp2p.New(ctx,
 		libp2p.Identity(key.Private),
 		libp2p.ListenAddrStrings(listenAddrPort),
 		libp2p.Ping(false),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
-		libp2p.Security(secio.ID, secio.New),
+		libp2p.Security(noise.ID, noise.New),
 		libp2p.DefaultTransports,
 		// Let's prevent our peer from having too many
 		libp2p.ConnectionManager(connmgr.NewConnManager(
@@ -185,14 +189,15 @@ func (n *Node) GetSyncing() bool {
 }
 
 func (n *Node) HandleGossip(msg *pubsub.Message) error {
-	if n.Host.ID().Pretty() == msg.ReceivedFrom.Pretty() {
-		return nil
-	}
+
 	gossip := GossipPayload{}
 	if err := proto.Unmarshal(msg.Data, &gossip); err != nil {
 		return err
 	}
 	if gossip.Type == GossipPayload_TRANSACTION {
+		if n.Host.ID().String() == msg.ReceivedFrom.String() {
+			return nil
+		}
 		tx := UnserializeTransaction(gossip.Payload)
 		ok, err := n.BlockChain.IsValidTransaction(tx)
 		if err != nil {
@@ -211,6 +216,9 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		}
 
 	} else if gossip.Type == GossipPayload_BLOCK {
+		if n.Host.ID().String() == msg.ReceivedFrom.String() {
+			return nil
+		}
 		// node is syncing
 		if n.GetSyncing() {
 			return nil
@@ -222,6 +230,12 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 		ok := ValidateBlock(blc)
 		if ok {
+
+			// if node is a data verifier
+			if n.DataVerifierProtocol.Enabled {
+				n.DataVerifierProtocol.HandleIncomingBlock(blc)
+			}
+
 			n.BlockChain.AddBlockPool(blc)
 
 		} else {
@@ -238,10 +252,6 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		fromPeer, err := peer.Decode(dqr.FromPeerAddr)
 		if err != nil {
 			return err
-		}
-
-		if fromPeer == n.Host.ID() {
-			return nil
 		}
 
 		if n.BinLayerEngine.Enabled {
@@ -331,6 +341,12 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				return err
 			}
 
+			// stop if there are unavailable nodes
+			if len(unavailableNodes) > 0 {
+				log.Warn(err)
+				return nil
+			}
+
 			if totalSize > 0 {
 				var feesGB, _ = new(big.Int).SetString(n.BinLayerEngine.FeesPerGB, 10)
 				var gbInBytes, _ = new(big.Int).SetString("1073741824", 10)
@@ -345,7 +361,14 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 					return nil
 				}
 
+				availableNodesBytes := [][]byte{}
+				for _, availableNode := range availableNodes {
+					bt, _ := hexutil.Decode(availableNode.Hash)
+					availableNodesBytes = append(availableNodesBytes, bt)
+				}
+
 				dqres := DataQueryResponse{
+					Nodes:             availableNodesBytes,
 					UnavailableNodes:  unavailableNodes,
 					FromPeerAddr:      n.GetReachableAddr(),
 					TotalFeesRequired: finalAmountHex,
@@ -378,25 +401,30 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 					log.Warn(err)
 					return nil
 				}
-				log.Println("finding remote peer ", rpdecoded.String())
-				pinfo, err := n.DHT.FindPeer(ctx, rpdecoded)
-				if err != nil {
-					log.Warn("couldn't find peer ", err)
-					return nil
-				}
 
-				// pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
-				if err == nil {
-					success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dtqEnvelope)
-					if success {
-						log.Println("Successfully sent message back to initiator peer")
-					}
+				if fromPeer == n.Host.ID() {
+					dqres.Signature = dtqEnvelope.Signature
+					n.DataQueryProtocol.PutQueryResponse(dqres.Hash, dqres)
 				} else {
-					log.Warn(err)
+					log.Println("finding remote peer ", rpdecoded.String())
+					pinfo, err := n.DHT.FindPeer(ctx, rpdecoded)
+					if err != nil {
+						log.Warn("couldn't find peer ", err)
+						return nil
+					}
+
+					// pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
+					if err == nil {
+						success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dtqEnvelope)
+						if success {
+							log.Println("Successfully sent message back to initiator peer")
+						}
+					} else {
+						log.Warn(err)
+					}
 				}
 
 			}
-
 			// s, err := n.Host.NewStream(ctx, p, DataQueryServiceID)
 		}
 	}
@@ -444,6 +472,44 @@ func (n *Node) GetAddrs() ([]multiaddr.Multiaddr, error) {
 	return peer.AddrInfoToP2pAddrs(&peerInfo)
 }
 
+// GetPublicKey get nodes public key in bytes
+func (n *Node) GetPublicKeyBytes() (dt []byte, _ error) {
+	pkey, err := n.Host.ID().ExtractPublicKey()
+	if err != nil {
+		return dt, err
+	}
+
+	bts, err := pkey.Raw()
+	if err != nil {
+		return dt, err
+	}
+
+	return bts, nil
+}
+
+// FindPeers used DHT to discover addinfo of peers
+func (n *Node) FindPeers(peerIDs []peer.ID) []peer.AddrInfo {
+	discoveredPeers := []peer.AddrInfo{}
+	var wg sync.WaitGroup
+	mutex := sync.Mutex{}
+	for _, peerAddr := range peerIDs {
+		wg.Add(1)
+		go func(peer peer.ID) {
+			defer wg.Done()
+			ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+			addr, err := n.DHT.FindPeer(ctx, peer)
+			if err == nil {
+				mutex.Lock()
+				discoveredPeers = append(discoveredPeers, addr)
+				mutex.Unlock()
+			}
+		}(peerAddr)
+	}
+	wg.Wait()
+	return discoveredPeers
+}
+
+// Bootstrap connects to a list of bootstrap nodes
 func (n *Node) Bootstrap(ctx context.Context, bootstrapPeers []string) error {
 	if err := n.DHT.Bootstrap(ctx); err != nil {
 		return err
@@ -468,6 +534,7 @@ func (n *Node) Bootstrap(ctx context.Context, bootstrapPeers []string) error {
 	return nil
 }
 
+// ConnectToPeerWithMultiaddr connects to a node given its full address
 func (n *Node) ConnectToPeerWithMultiaddr(remoteAddr string, ctx context.Context) (*peer.AddrInfo, error) {
 
 	addr, err := multiaddr.NewMultiaddr(remoteAddr)
@@ -485,12 +552,14 @@ func (n *Node) ConnectToPeerWithMultiaddr(remoteAddr string, ctx context.Context
 	return p, nil
 }
 
-func (n *Node) Advertise(ctx context.Context) {
+// AdvertiseRendezvous places a cid to the routingdiscovery which internally uses the dht
+func (n *Node) AdvertiseRendezvous(ctx context.Context) {
 	n.RoutingDiscovery = discovery.NewRoutingDiscovery(n.DHT)
 	discovery.Advertise(ctx, n.RoutingDiscovery, "FINDMEHERE")
 }
 
-func (n *Node) FindPeers(ctx context.Context) (adrs []peer.AddrInfo, err error) {
+// FindRendezvousPeers retuns peers that have announced specific cid
+func (n *Node) FindRendezvousPeers(ctx context.Context) (adrs []peer.AddrInfo, err error) {
 	peerChan, err := n.RoutingDiscovery.FindPeers(ctx, "FINDMEHERE")
 	if err != nil {
 		return adrs, err

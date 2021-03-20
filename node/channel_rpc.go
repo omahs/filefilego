@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/filefilego/filefilego/common"
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/crypto"
 	"github.com/golang/protobuf/proto"
+	"github.com/libp2p/go-libp2p-core/peer"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -249,4 +253,86 @@ func (api *ChannelAPI) DataQueryResult(ctx context.Context, hash string) ([]Data
 		return res, errors.New("response not available")
 	}
 	return res, nil
+}
+
+// PrepareDataContract prepares a data contract
+func (api *ChannelAPI) PrepareDataContract(ctx context.Context, hash string, fromPeer string) (string, error) {
+	res, ok := api.Node.DataQueryProtocol.GetQueryResponse(hash)
+	if !ok {
+		return "", errors.New("response not available")
+	}
+
+	for _, v := range res {
+		if v.FromPeerAddr == fromPeer {
+
+			peerIDs := []peer.ID{}
+			for _, v := range GetBlockchainSettings().Verifiers {
+				if v.DataVerifier {
+					pubKey, err := crypto.PublicKeyFromRawHex(v.PublicKey)
+					if err != nil {
+						continue
+					}
+
+					id, err := peer.IDFromPublicKey(pubKey)
+					if err != nil {
+						continue
+					}
+					peerIDs = append(peerIDs, id)
+				}
+			}
+
+			accessibleVerifiers := api.Node.FindPeers(peerIDs)
+			if len(accessibleVerifiers) == 0 {
+				return "", errors.New("Unable to find verifiers")
+			}
+			randomIndex := rand.Intn(len(accessibleVerifiers))
+			verifier := accessibleVerifiers[randomIndex]
+			vpid := verifier.ID
+
+			vpubKey := []byte{}
+			for _, v := range GetBlockchainSettings().Verifiers {
+				if v.DataVerifier {
+					pk, err := crypto.PublicKeyFromRawHex(v.PublicKey)
+					if err != nil {
+						continue
+					}
+					pid, _ := peer.IDFromPublicKey(pk)
+					if pid.String() == vpid.String() {
+						vpubKey, _ = hexutil.Decode(v.PublicKey)
+					}
+				}
+			}
+
+			rawPubKeyBytes, err := api.Node.GetPublicKeyBytes()
+			if err != nil {
+				return "", err
+			}
+
+			contract := DataContract{
+				HostResponse:        &v,
+				VerifierPubKey:      vpubKey,
+				RequesterNodePubKey: rawPubKeyBytes,
+			}
+
+			bts, err := proto.Marshal(&contract)
+			if err != nil {
+				return "", err
+			}
+
+			pl := TransactionDataPayload{
+				Type:    TransactionDataPayloadType_DATA_CONTRACT,
+				Payload: bts,
+			}
+
+			plBits, err := proto.Marshal(&pl)
+			if err != nil {
+				return "", err
+			}
+
+			return hexutil.Encode(plBits), nil
+
+		}
+	}
+
+	return "", errors.New("Data provider not available")
 }

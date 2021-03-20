@@ -69,6 +69,11 @@ var (
 		Usage: "Binlayer fees (ARAN) per GB of data",
 	}
 
+	DataVerifier = cli.BoolFlag{
+		Name:  "verify",
+		Usage: "Enable data verification(if verifier in genesis)",
+	}
+
 	RPCFlag = cli.BoolFlag{
 		Name:  "rpc",
 		Usage: "Enable JSON-RPC protocol",
@@ -193,6 +198,7 @@ var AppFlags = []cli.Flag{
 	BinLayerDir,
 	BinLayerToken,
 	BinLayerFeesGB,
+	DataVerifier,
 
 	RPCFlag,
 	RPCServicesFlag,

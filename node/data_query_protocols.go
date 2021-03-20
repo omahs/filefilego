@@ -87,6 +87,20 @@ func (dqp *DataQueryProtocol) GetQueryResponse(key string) ([]DataQueryResponse,
 // 	fmt.Println(buf)
 // }
 
+// NewDataQueryProtocol returns a new instance and registers the handlers
+func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
+	p := &DataQueryProtocol{
+		Node:             n,
+		queryHistoryMux:  &sync.Mutex{},
+		queryResponseMux: &sync.Mutex{},
+		queryHistory:     make(map[string]DataQueryRequest),
+		queryResponse:    make(map[string][]DataQueryResponse),
+	}
+	// n.Host.SetStreamHandler(DataQueryRequestID, p.onDataQueryRequest)
+	n.Host.SetStreamHandler(DataQueryResponseID, p.onDataQueryResponse)
+	return p
+}
+
 func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 	// s.Conn().RemotePeer() is the remote peer
 	buf, err := ioutil.ReadAll(s)
@@ -125,21 +139,18 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 		return
 	}
 
+	// need the sig for later verification
+	tmp.Signature = env.Signature
 	dqp.PutQueryResponse(tmp.Hash, tmp)
-}
 
-// NewDataQueryProtocol returns a new instance and registers the handlers
-func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
-	p := &DataQueryProtocol{
-		Node:             n,
-		queryHistoryMux:  &sync.Mutex{},
-		queryResponseMux: &sync.Mutex{},
-		queryHistory:     make(map[string]DataQueryRequest),
-		queryResponse:    make(map[string][]DataQueryResponse),
-	}
-	// n.Host.SetStreamHandler(DataQueryRequestID, p.onDataQueryRequest)
-	n.Host.SetStreamHandler(DataQueryResponseID, p.onDataQueryResponse)
-	return p
+	// pbkey, err := crypto.UnmarshalPublicKey(tmp.PubKey)
+	// if err != nil {
+	// 	log.Warn(err)
+	// }
+	// pb, err := pbkey.Raw()
+	// addr := crypto.PublicToAddress(pb)
+	// log.Println("Remote peer who hosts the file has the following address: ", addr)
+
 }
 
 // SendDataQueryResponse sends back the response to initiator

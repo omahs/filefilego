@@ -760,7 +760,7 @@ func (bc *Blockchain) IsValidTransaction(transaction Transaction) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	if transaction.From != "0x"+crypto.PublicToAddress(pbkbts) && transaction.From != "0X"+crypto.PublicToAddress(pbkbts) {
+	if transaction.From != crypto.RawPublicToAddress(pbkbts) && transaction.From != crypto.RawPublicToAddress(pbkbts) {
 		return false, errors.New("signer and sender mismatch")
 	}
 

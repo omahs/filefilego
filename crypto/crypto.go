@@ -2,14 +2,15 @@ package crypto
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"hash"
 	"io"
 	"os"
 
+	"github.com/filefilego/filefilego/common/hexutil"
 	log "github.com/sirupsen/logrus"
 
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
+	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
 	sha3 "golang.org/x/crypto/sha3"
 )
 
@@ -29,7 +30,7 @@ func GenerateKeyPair() (KeyPair, error) {
 	if err != nil {
 		return KeyPair{}, err
 	}
-	return KeyPair{Private: priv, Address: PublicToAddress(publicBytes)}, nil
+	return KeyPair{Private: priv, Address: RawPublicToAddress(publicBytes)}, nil
 }
 
 // RestorePrivateKey unmarshals the privateKey
@@ -49,6 +50,34 @@ func UnmarshalPublicKey(pubKey []byte) (crypto.PubKey, error) {
 	return k, err
 }
 
+// PublicKeyHex returns the hex value of a pubkey
+func PublicKeyHex(k crypto.PubKey) (string, error) {
+	bts, err := k.Raw()
+	return hexutil.Encode(bts), err
+}
+
+// PublicKeyFromRawHex creates a protobuf envelope and inserts data from hex
+func PublicKeyFromRawHex(str string) (pk crypto.PubKey, _ error) {
+
+	bts, err := hexutil.Decode(str)
+	if err != nil {
+		return pk, err
+	}
+
+	// the protobug message and keytype
+	ss := pb.PublicKey{
+		Type: pb.KeyType_Secp256k1,
+		Data: bts,
+	}
+	copy(ss.Data, bts)
+	finalKey, err := crypto.PublicKeyFromProto(&ss)
+	if err != nil {
+		return pk, err
+	}
+	return finalKey, nil
+
+}
+
 // UnmarshalSecp256k1PubKey unmarshals a secp256k1 pubKey
 func UnmarshalSecp256k1PubKey(pubKey []byte) (crypto.PubKey, error) {
 	return crypto.UnmarshalSecp256k1PublicKey(pubKey)
@@ -65,8 +94,8 @@ func RestorePrivateToKeyPair(privateKey []byte) (crypto.PrivKey, crypto.PubKey, 
 }
 
 // PublicToAddress returns the address of a public key
-func PublicToAddress(data []byte) string {
-	return hex.EncodeToString(Keccak256(data)[12:])
+func RawPublicToAddress(data []byte) string {
+	return hexutil.Encode(Keccak256(data)[12:])
 }
 
 //Keccak256 return sha3 of a given byte array
