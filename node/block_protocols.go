@@ -251,7 +251,6 @@ func (bp *BlockProtocol) GetNextPeer() (*RemotePeer, error) {
 		idx = 0
 	}
 
-	log.Println("GetNextPeer ", idx)
 	h := bp.RemotePeers[idx]
 	bp.RoundIndex++
 	return h, nil

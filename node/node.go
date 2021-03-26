@@ -611,7 +611,7 @@ func (n *Node) Sync(ctx context.Context) error {
 		for n.BlockChain.GetHeight() <= n.BlockProtocol.GetHeighestBlock() {
 			request := BlockQueryRequest{
 				BlockNoFrom: n.BlockChain.GetHeight() + 1,
-				BlockNoTo:   n.BlockChain.GetHeight() + 10,
+				BlockNoTo:   n.BlockChain.GetHeight() + 100,
 			}
 
 			// get the remote node
@@ -619,7 +619,6 @@ func (n *Node) Sync(ctx context.Context) error {
 			rh, err := n.BlockProtocol.GetNextPeer()
 
 			if err != nil {
-				log.Warn("disconnected from all peers")
 				break
 			}
 
@@ -629,7 +628,6 @@ func (n *Node) Sync(ctx context.Context) error {
 
 			if n.BlockChain.GetHeight() > rh.Height {
 				n.BlockProtocol.RemovePeer(rh)
-				log.Println("current blockchain is longer than remote")
 				continue
 			}
 
@@ -639,8 +637,9 @@ func (n *Node) Sync(ctx context.Context) error {
 			}
 
 			if len(blockRes.Payload) > 0 {
+				log.Printf("Downloaded %d blocks from peer: %s\n", len(blockRes.Payload), rh.Peer.String())
 				for _, b := range blockRes.Payload {
-					log.Println("Downloaded block ", hexutil.Encode(b.Hash), " from peer: ", rh.Peer.String())
+
 					err := n.BlockChain.AddBlockPool(*b)
 					if err != nil {
 						log.Error("Problem adding block to current chain ", err)
@@ -656,6 +655,7 @@ func (n *Node) Sync(ctx context.Context) error {
 	n.BlockProtocol.Reset()
 	n.BlockChain.ClearBlockPool(false)
 	n.SetSyncing(false)
+	log.Println("sync finished")
 	return nil
 }
 

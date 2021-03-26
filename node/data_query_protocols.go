@@ -119,8 +119,8 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 		return
 	}
 
-	sig := []byte{}
-	copy(sig, tmp.Signature)
+	sig := tmp.Signature
+
 	tmp.Signature = []byte{}
 
 	payloadBts, err := proto.Marshal(&tmp)
@@ -130,7 +130,7 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 	}
 
 	// verify response
-	if !dqp.Node.VerifyData(payloadBts, tmp.Signature, s.Conn().RemotePeer(), tmp.PubKey) {
+	if !dqp.Node.VerifyData(payloadBts, sig, s.Conn().RemotePeer(), tmp.PubKey) {
 		log.Warn("couldn't verify incoming data")
 		return
 	}
