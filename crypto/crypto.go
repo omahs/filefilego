@@ -3,11 +3,8 @@ package crypto
 import (
 	"crypto/sha256"
 	"hash"
-	"io"
-	"os"
 
 	"github.com/filefilego/filefilego/common/hexutil"
-	log "github.com/sirupsen/logrus"
 
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
 	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
@@ -36,18 +33,6 @@ func GenerateKeyPair() (KeyPair, error) {
 // RestorePrivateKey unmarshals the privateKey
 func RestorePrivateKey(privateKey []byte) (crypto.PrivKey, error) {
 	return crypto.UnmarshalSecp256k1PrivateKey(privateKey)
-}
-
-// MarshalPublicKey marshals a pubkey
-func MarshalPublicKey(k crypto.PubKey) ([]byte, error) {
-	bts, err := crypto.MarshalPublicKey(k)
-	return bts, err
-}
-
-// UnmarshalPublicKey unmarshals a pubkey
-func UnmarshalPublicKey(pubKey []byte) (crypto.PubKey, error) {
-	k, err := crypto.UnmarshalPublicKey(pubKey)
-	return k, err
 }
 
 // PublicKeyHex returns the hex value of a pubkey
@@ -119,23 +104,4 @@ func Sha256HashHexBytes(data []byte) []byte {
 	hash := sha256.Sum256(data)
 	bts := hash[:]
 	return bts
-}
-
-// HashFile hashes the file with the sha256
-func HashFile(file io.Reader) []byte {
-	h := sha256.New()
-	if _, err := io.Copy(h, file); err != nil {
-		log.Fatal(err)
-	}
-	return h.Sum(nil)
-}
-
-// HashFilePath hashes the file that exists in the filePath with the sha256
-func HashFilePath(filePath string) ([]byte, error) {
-	if file, err := os.Open(filePath); err == nil {
-		defer file.Close()
-		return HashFile(file), nil
-	} else {
-		return nil, err
-	}
 }

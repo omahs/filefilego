@@ -92,7 +92,7 @@ func (rp *RemotePeer) DownloadBlocksRange(breq BlockQueryRequest) (bqr BlockQuer
 			}
 
 			if err := proto.Unmarshal(dt, &bqr); err != nil {
-				log.Warn("error while unmarshalling data from stream: ", err)
+				log.Error("error while unmarshalling data from stream: ", err)
 
 				return bqr, err
 			}
@@ -166,7 +166,7 @@ func (rp *RemotePeer) GetHeight() (bqr NodeHeightResponse, _ error) {
 			}
 
 			if err := proto.Unmarshal(dt, &bqr); err != nil {
-				log.Warn("error while unmarshalling data from stream: ", err)
+				log.Error("error while unmarshalling data from stream: ", err)
 
 				return bqr, err
 			}

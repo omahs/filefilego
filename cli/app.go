@@ -43,6 +43,11 @@ func init() {
 }
 
 func entry(ctx *cli.Context) error {
+
+	// crypto.EncryptFile()
+
+	// return nil
+
 	cfg := GetConfig(ctx)
 
 	// check for node identity file first
@@ -123,8 +128,8 @@ func entry(ctx *cli.Context) error {
 		log.Println("Data verification is enabled")
 
 		// register the and start protocol + handlers
-		node.DataVerifierProtocol = npkg.NewDataVerifierProtocol(&node)
 	}
+	node.DataVerifierProtocol = npkg.NewDataVerifierProtocol(&node)
 
 	// how can this node be reached
 	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))

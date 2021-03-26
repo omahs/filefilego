@@ -133,9 +133,9 @@ func (n *Node) SignData(data []byte) ([]byte, error) {
 
 // VerifyData given a pubkey and signature + data returns the verification result
 func (n *Node) VerifyData(data []byte, signature []byte, peerID peer.ID, pubKeyData []byte) bool {
-	key, err := crypto.UnmarshalPublicKey(pubKeyData)
+	key, err := crypto.PublicKeyFromRawHex(hexutil.Encode(pubKeyData))
 	if err != nil {
-		log.Warn(err, "Failed to extract key from message key data")
+		log.Error(err, "Failed to extract key from message key data")
 		return false
 	}
 
@@ -143,19 +143,19 @@ func (n *Node) VerifyData(data []byte, signature []byte, peerID peer.ID, pubKeyD
 	idFromKey, err := peer.IDFromPublicKey(key)
 
 	if err != nil {
-		log.Warn(err, "Failed to extract peer id from public key")
+		log.Error(err, "Failed to extract peer id from public key")
 		return false
 	}
 
 	// verify that message author node id matches the provided node public key
 	if idFromKey != peerID {
-		log.Warn(err, "Node id and provided public key mismatch")
+		log.Error(err, "Node id and provided public key mismatch")
 		return false
 	}
 
 	res, err := key.Verify(data, signature)
 	if err != nil {
-		log.Warn(err, "Error authenticating data")
+		log.Error(err, "Error authenticating data")
 		return false
 	}
 
@@ -343,7 +343,7 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 			// stop if there are unavailable nodes
 			if len(unavailableNodes) > 0 {
-				log.Warn(err)
+
 				return nil
 			}
 
@@ -355,9 +355,9 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				factor := gbInBytes.Div(gbInBytes, tsBig)
 				finalAmount := feesGB.Div(feesGB, factor)
 				finalAmountHex := hexutil.EncodeBig(finalAmount)
-				pubKeyBytes, err := crypto.MarshalPublicKey(n.Host.Peerstore().PubKey(n.Host.ID()))
+				pubKeyBytes, err := n.GetPublicKeyBytes()
 				if err != nil {
-					log.Warn("Unable to get public key bytes")
+					log.Error("Unable to get public key bytes")
 					return nil
 				}
 
@@ -389,10 +389,7 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 					return nil
 				}
 
-				dtqEnvelope := DataQueryResponseEnvelope{
-					Signature: signedBits,
-					Payload:   bts,
-				}
+				dqres.Signature = signedBits
 
 				ctx := context.Background()
 
@@ -403,19 +400,14 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				}
 
 				if fromPeer == n.Host.ID() {
-					dqres.Signature = dtqEnvelope.Signature
+
 					n.DataQueryProtocol.PutQueryResponse(dqres.Hash, dqres)
 				} else {
 					log.Println("finding remote peer ", rpdecoded.String())
 					pinfo, err := n.DHT.FindPeer(ctx, rpdecoded)
-					if err != nil {
-						log.Warn("couldn't find peer ", err)
-						return nil
-					}
 
-					// pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
 					if err == nil {
-						success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dtqEnvelope)
+						success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dqres)
 						if success {
 							log.Println("Successfully sent message back to initiator peer")
 						}
@@ -651,7 +643,7 @@ func (n *Node) Sync(ctx context.Context) error {
 					log.Println("Downloaded block ", hexutil.Encode(b.Hash), " from peer: ", rh.Peer.String())
 					err := n.BlockChain.AddBlockPool(*b)
 					if err != nil {
-						log.Warn("Problem adding block to current chain ", err)
+						log.Error("Problem adding block to current chain ", err)
 					}
 				}
 			}

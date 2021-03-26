@@ -40,7 +40,7 @@ func IsValidChannelPayload(t Transaction, currentBalance *big.Int) bool {
 
 	txVal, err1 := hexutil.DecodeBig(t.Value)
 	if err1 != nil {
-		log.Warn(err1)
+		log.Error(err1)
 		return false
 	}
 
@@ -66,12 +66,12 @@ func IsValidChannelPayload(t Transaction, currentBalance *big.Int) bool {
 		}
 
 		if currentBalance.Cmp(totalBalanceRequired) < 0 {
-			log.Warn("not much balance for namespace registration")
+
 			return false
 		}
 
 		if txVal.Cmp(totalBalanceRequired) < 0 {
-			log.Warn("not enough amount in tx.Value")
+
 			return false
 		}
 

@@ -111,24 +111,26 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 		return
 	}
 
-	env := DataQueryResponseEnvelope{}
-	err = proto.Unmarshal(buf, &env)
+	tmp := DataQueryResponse{}
+	err = proto.Unmarshal(buf, &tmp)
 	if err != nil {
 		s.Reset()
-		log.Warn(err)
+		log.Error(err)
 		return
 	}
 
-	tmp := DataQueryResponse{}
-	err = proto.Unmarshal(env.Payload, &tmp)
+	sig := []byte{}
+	copy(sig, tmp.Signature)
+	tmp.Signature = []byte{}
+
+	payloadBts, err := proto.Marshal(&tmp)
 	if err != nil {
-		s.Reset()
-		log.Warn(err)
+		log.Error(err)
 		return
 	}
 
 	// verify response
-	if !dqp.Node.VerifyData(env.Payload, env.Signature, s.Conn().RemotePeer(), tmp.PubKey) {
+	if !dqp.Node.VerifyData(payloadBts, tmp.Signature, s.Conn().RemotePeer(), tmp.PubKey) {
 		log.Warn("couldn't verify incoming data")
 		return
 	}
@@ -140,7 +142,7 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 	}
 
 	// need the sig for later verification
-	tmp.Signature = env.Signature
+	tmp.Signature = sig
 	dqp.PutQueryResponse(tmp.Hash, tmp)
 
 	// pbkey, err := crypto.UnmarshalPublicKey(tmp.PubKey)
@@ -154,23 +156,23 @@ func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
 }
 
 // SendDataQueryResponse sends back the response to initiator
-func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponseEnvelope) bool {
+func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponse) bool {
 	s, err := dqp.Node.Host.NewStream(context.Background(), addrInfo.ID, DataQueryResponseID)
 	if err != nil {
-		log.Warn(err)
+		log.Error("unable to connect to initiator: ", err)
 		return false
 	}
 	defer s.Close()
 
 	bts, err := proto.Marshal(payload)
 	if err != nil {
-		log.Warn(err)
+		log.Error(err)
 		return false
 	}
 
 	_, err = s.Write(bts)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		s.Reset()
 		return false
 	}
