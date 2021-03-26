@@ -2,7 +2,6 @@ package node
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
@@ -808,17 +807,17 @@ func (bc *Blockchain) GetNounceFromMemPool(address string) (string, error) {
 }
 
 // AddBlockPool adds a block to the blockpool and performs db storage + state mutations + mempool cleaning from txs
-func (bc *Blockchain) AddBlockPool(block Block) error {
+func (bc *Blockchain) AddBlockPool(block Block) (bool, error) {
 
 	bc.BlockPoolMux.Lock()
 	defer bc.BlockPoolMux.Unlock()
 	if len(block.Hash) == 0 {
-		return errors.New("block has no hash data")
+		return false, errors.New("block has no hash data")
 	}
 
 	_, ok := bc.BlockPool[hex.EncodeToString(block.Hash)]
 	if ok {
-		return errors.New("a block with the same hash is already in blockpool")
+		return false, errors.New("a block with the same hash is already in blockpool")
 	}
 	last := []byte{}
 
@@ -913,10 +912,10 @@ func (bc *Blockchain) AddBlockPool(block Block) error {
 	// if blockPool len > 0, some blocks are missing so trigger a sync here
 	if len(bc.BlockPool) > 0 && !bc.Node.GetSyncing() {
 		log.Info("sync triggered. Blockpool size: ", len(bc.BlockPool))
-		bc.Node.Sync(context.Background())
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 // ClearBlockPool clears the blockpool

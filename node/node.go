@@ -236,7 +236,10 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				n.DataVerifierProtocol.HandleIncomingBlock(blc)
 			}
 
-			n.BlockChain.AddBlockPool(blc)
+			syncAgain, _ := n.BlockChain.AddBlockPool(blc)
+			if syncAgain {
+				n.Sync(context.Background())
+			}
 
 		} else {
 			log.Warn("Got an invalid block")
@@ -572,7 +575,10 @@ func (n *Node) Peers() peer.IDSlice {
 
 // Sync the blockchain with other nodes
 func (n *Node) Sync(ctx context.Context) error {
+	n.BlockProtocol.Reset()
+	n.BlockChain.ClearBlockPool(false)
 
+	syncAgain := false
 	if n.GetSyncing() {
 		return nil
 	}
@@ -585,7 +591,7 @@ func (n *Node) Sync(ctx context.Context) error {
 			continue
 		}
 		wg.Add(1)
-		go func(p peer.ID) {
+		go func(p peer.ID, wg *sync.WaitGroup) {
 			rh, err := NewRemotePeer(n, p)
 			if err == nil {
 
@@ -599,11 +605,11 @@ func (n *Node) Sync(ctx context.Context) error {
 				log.Warn(err)
 			}
 			wg.Done()
-		}(p)
+		}(p, &wg)
 	}
 
+	log.Println("connecting to peers for syncing")
 	wg.Wait()
-
 	log.Println("syncing with nodes: ", len(n.BlockProtocol.RemotePeers))
 
 	// while this blockchain is behind the remote ones
@@ -640,22 +646,29 @@ func (n *Node) Sync(ctx context.Context) error {
 				log.Printf("Downloaded %d blocks from peer: %s\n", len(blockRes.Payload), rh.Peer.String())
 				for _, b := range blockRes.Payload {
 
-					err := n.BlockChain.AddBlockPool(*b)
+					syncAgain, err = n.BlockChain.AddBlockPool(*b)
 					if err != nil {
 						log.Error("Problem adding block to current chain ", err)
 					}
+
+					if syncAgain {
+						break
+					}
 				}
 			}
+
 			if blockRes.NodeHeight <= n.BlockChain.GetHeight() {
 				n.BlockProtocol.RemovePeer(rh)
 			}
 		}
 	}
 
-	n.BlockProtocol.Reset()
-	n.BlockChain.ClearBlockPool(false)
 	n.SetSyncing(false)
 	log.Println("sync finished")
+
+	if syncAgain {
+		n.Sync(ctx)
+	}
 	return nil
 }
 

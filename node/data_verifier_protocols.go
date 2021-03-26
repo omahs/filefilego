@@ -63,6 +63,7 @@ func (dqp *DataVerifierProtocol) onDataVerifierRequest(s network.Stream) {
 
 	rawBitsVerifier, err := pPubKeyVerifier.Raw()
 	if err != nil {
+
 		return
 	}
 
@@ -107,7 +108,6 @@ func (dqp *DataVerifierProtocol) extractContractFromTransaction(tx *Transaction)
 	}
 
 	if tpl.Type == TransactionDataPayloadType_DATA_CONTRACT {
-		dc := DataContract{}
 		err := proto.Unmarshal(tpl.Payload, &dc)
 		if err != nil {
 			return dc, false
@@ -129,12 +129,15 @@ func (dqp *DataVerifierProtocol) HandleIncomingBlock(block Block) {
 		if !ok {
 			continue
 		}
+
 		// handle this data contract
 		if bytes.Equal(dc.VerifierPubKey, nodePubKeyBytes) {
 			if dqp.coordinate(dc, tx) {
 				dqp.contMutex.Lock()
 				dqp.contracts = append(dqp.contracts, dc)
 				dqp.contMutex.Unlock()
+			} else {
+				log.Warn("coordination failed")
 			}
 		}
 	}
@@ -206,6 +209,7 @@ func (dqp *DataVerifierProtocol) coordinate(contract DataContract, tx *Transacti
 	log.Println("executing data contract")
 	hostID, downloaderID, ok := dqp.verifyContract(contract, tx)
 	if !ok {
+		log.Warn("contract invalid")
 		return false
 	}
 
