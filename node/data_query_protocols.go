@@ -87,47 +87,6 @@ func (dqp *DataQueryProtocol) GetQueryResponse(key string) ([]DataQueryResponse,
 // 	fmt.Println(buf)
 // }
 
-func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
-	// s.Conn().RemotePeer() is the remote peer
-	buf, err := ioutil.ReadAll(s)
-	defer s.Close()
-	if err != nil {
-		s.Reset()
-		log.Warn(err)
-		return
-	}
-
-	env := DataQueryResponseEnvelope{}
-	err = proto.Unmarshal(buf, &env)
-	if err != nil {
-		s.Reset()
-		log.Warn(err)
-		return
-	}
-
-	tmp := DataQueryResponse{}
-	err = proto.Unmarshal(env.Payload, &tmp)
-	if err != nil {
-		s.Reset()
-		log.Warn(err)
-		return
-	}
-
-	// verify response
-	if !dqp.Node.VerifyData(env.Payload, env.Signature, s.Conn().RemotePeer(), tmp.PubKey) {
-		log.Warn("couldn't verify incoming data")
-		return
-	}
-
-	// check if this node has requested
-	_, ok := dqp.GetQueryHistory(tmp.Hash)
-	if !ok {
-		return
-	}
-
-	dqp.PutQueryResponse(tmp.Hash, tmp)
-}
-
 // NewDataQueryProtocol returns a new instance and registers the handlers
 func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
 	p := &DataQueryProtocol{
@@ -142,24 +101,78 @@ func NewDataQueryProtocol(n *Node) *DataQueryProtocol {
 	return p
 }
 
+func (dqp *DataQueryProtocol) onDataQueryResponse(s network.Stream) {
+	// s.Conn().RemotePeer() is the remote peer
+	buf, err := ioutil.ReadAll(s)
+	defer s.Close()
+	if err != nil {
+		s.Reset()
+		log.Warn(err)
+		return
+	}
+
+	tmp := DataQueryResponse{}
+	err = proto.Unmarshal(buf, &tmp)
+	if err != nil {
+		s.Reset()
+		log.Error(err)
+		return
+	}
+
+	sig := tmp.Signature
+
+	tmp.Signature = []byte{}
+
+	payloadBts, err := proto.Marshal(&tmp)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	// verify response
+	if !dqp.Node.VerifyData(payloadBts, sig, s.Conn().RemotePeer(), tmp.PubKey) {
+		log.Warn("couldn't verify incoming data")
+		return
+	}
+
+	// check if this node has requested
+	_, ok := dqp.GetQueryHistory(tmp.Hash)
+	if !ok {
+		return
+	}
+
+	// need the sig for later verification
+	tmp.Signature = sig
+	dqp.PutQueryResponse(tmp.Hash, tmp)
+
+	// pbkey, err := crypto.UnmarshalPublicKey(tmp.PubKey)
+	// if err != nil {
+	// 	log.Warn(err)
+	// }
+	// pb, err := pbkey.Raw()
+	// addr := crypto.PublicToAddress(pb)
+	// log.Println("Remote peer who hosts the file has the following address: ", addr)
+
+}
+
 // SendDataQueryResponse sends back the response to initiator
-func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponseEnvelope) bool {
+func (dqp *DataQueryProtocol) SendDataQueryResponse(addrInfo *peer.AddrInfo, payload *DataQueryResponse) bool {
 	s, err := dqp.Node.Host.NewStream(context.Background(), addrInfo.ID, DataQueryResponseID)
 	if err != nil {
-		log.Warn(err)
+		log.Error("unable to connect to initiator: ", err)
 		return false
 	}
 	defer s.Close()
 
 	bts, err := proto.Marshal(payload)
 	if err != nil {
-		log.Warn(err)
+		log.Error(err)
 		return false
 	}
 
 	_, err = s.Write(bts)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		s.Reset()
 		return false
 	}

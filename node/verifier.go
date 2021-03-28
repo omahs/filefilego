@@ -13,6 +13,7 @@ type Verifier struct {
 	Address         string `json:"address"`
 	InitialBalance  string `json:"initial_balance"`
 	PublicKey       string `json:"public_key"`
+	DataVerifier    bool   `json:"data_verifier"`
 	PublicKeyCrypto crypto.PubKey
 }
 

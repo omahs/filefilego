@@ -32,20 +32,28 @@ func (b *Block) HashTransactions() []byte {
 }
 
 // NewBlock creates and returns Block
-func NewBlock(transactions []*Transaction, prevBlockHash []byte, data []byte, unixtime int64, signer *keystore.Key) Block {
+func NewBlock(transactions []*Transaction, prevBlockHash []byte, data []byte, unixtime int64, signer *keystore.Key) (Block, error) {
 
 	block := Block{Timestamp: unixtime, Data: data, PrevBlockHash: prevBlockHash, Hash: []byte{}, Signature: []byte{}, Transactions: transactions}
-	hash, sig := SealBlock(block, signer)
+	hash, sig, err := SealBlock(block, signer)
+	if err != nil {
+		log.Error(err)
+		return block, err
+	}
 	block.Hash = hash[:]
 	block.Signature = sig
-	return block
+	return block, nil
 }
 
 // SealBlock seals a block
-func SealBlock(b Block, signer *keystore.Key) ([]byte, []byte) {
+func SealBlock(b Block, signer *keystore.Key) ([]byte, []byte, error) {
+	hxBytes, err := IntToHex(b.Timestamp)
+	if err != nil {
+		return nil, nil, err
+	}
 	data := bytes.Join(
 		[][]byte{
-			IntToHex(b.Timestamp),
+			hxBytes,
 			b.Data,
 			b.PrevBlockHash,
 			b.HashTransactions(),
@@ -56,9 +64,10 @@ func SealBlock(b Block, signer *keystore.Key) ([]byte, []byte) {
 	hash := sha256.Sum256(data)
 	signedData, err := signer.Private.Sign(hash[:])
 	if err != nil {
-		log.Fatal("Unable to sign block")
+		log.Error("Unable to sign block")
+		return hash[:], signedData, err
 	}
-	return hash[:], signedData
+	return hash[:], signedData, nil
 }
 
 // LogDetails logs the details of block
@@ -78,9 +87,14 @@ func (b *Block) LogDetails() {
 
 // ValidateBlock validates a block
 func ValidateBlock(b Block) bool {
+	hxBytes, err := IntToHex(b.Timestamp)
+	if err != nil {
+		log.Error(err)
+		return false
+	}
 	data := bytes.Join(
 		[][]byte{
-			IntToHex(b.Timestamp),
+			hxBytes,
 			b.Data,
 			b.PrevBlockHash,
 			b.HashTransactions(),
@@ -121,7 +135,7 @@ func ValidateBlock(b Block) bool {
 func DeserializeBlock(dt []byte) (Block, error) {
 	block := Block{}
 	if err := proto.Unmarshal(dt, &block); err != nil {
-		log.Warn("error while unmarshalling data from stream: ", err)
+		log.Error("error while unmarshalling data from stream: ", err)
 		return block, err
 	}
 	return block, nil

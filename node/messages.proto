@@ -29,11 +29,14 @@ message Transaction {
     bytes Chain = 10;
 }
 
+
+
 enum TransactionDataPayloadType {
     NONE = 0;
     UPDATE_BLOCKCHAIN_SETTINGS = 1;
     CREATE_NODE = 2;
     UPDATE_NODE = 3;
+    DATA_CONTRACT = 4;
 }
 
 message TransactionDataPayload {
@@ -91,12 +94,31 @@ message DataQueryResponse {
     string TotalFeesRequired = 3;
     string Hash = 4;
     bytes PubKey = 5;
-    int64 Timestamp = 6;
+    bytes Signature = 6;
+    repeated bytes Nodes = 7;
+    int64 Timestamp = 8;
 }
 
-message DataQueryResponseEnvelope {
-    bytes Signature = 1;
-    bytes Payload = 2;
+message DataContract {
+    DataQueryResponse HostResponse = 1;
+    bytes VerifierPubKey = 2;
+    bytes RequesterNodePubKey = 3;
+}
+
+message DataContractsEnvelop {
+    repeated DataContract Contracts = 1;
+}
+
+message DataVerifierRequestPayload {
+    Transaction Transaction = 1;
+    bytes ContractHash = 2;
+}
+
+message NodeRangeDataRequest {
+    bytes Node = 1;
+    bytes ContractHash = 2;
+    uint64 From = 3;
+    uint64 To = 4;
 }
 
 message GossipPayload {

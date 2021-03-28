@@ -2,14 +2,12 @@ package crypto
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"hash"
-	"io"
-	"os"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/filefilego/filefilego/common/hexutil"
 
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
+	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
 	sha3 "golang.org/x/crypto/sha3"
 )
 
@@ -29,7 +27,7 @@ func GenerateKeyPair() (KeyPair, error) {
 	if err != nil {
 		return KeyPair{}, err
 	}
-	return KeyPair{Private: priv, Address: PublicToAddress(publicBytes)}, nil
+	return KeyPair{Private: priv, Address: RawPublicToAddress(publicBytes)}, nil
 }
 
 // RestorePrivateKey unmarshals the privateKey
@@ -37,16 +35,32 @@ func RestorePrivateKey(privateKey []byte) (crypto.PrivKey, error) {
 	return crypto.UnmarshalSecp256k1PrivateKey(privateKey)
 }
 
-// MarshalPublicKey marshals a pubkey
-func MarshalPublicKey(k crypto.PubKey) ([]byte, error) {
-	bts, err := crypto.MarshalPublicKey(k)
-	return bts, err
+// PublicKeyHex returns the hex value of a pubkey
+func PublicKeyHex(k crypto.PubKey) (string, error) {
+	bts, err := k.Raw()
+	return hexutil.Encode(bts), err
 }
 
-// UnmarshalPublicKey unmarshals a pubkey
-func UnmarshalPublicKey(pubKey []byte) (crypto.PubKey, error) {
-	k, err := crypto.UnmarshalPublicKey(pubKey)
-	return k, err
+// PublicKeyFromRawHex creates a protobuf envelope and inserts data from hex
+func PublicKeyFromRawHex(str string) (pk crypto.PubKey, _ error) {
+
+	bts, err := hexutil.Decode(str)
+	if err != nil {
+		return pk, err
+	}
+
+	// the protobug message and keytype
+	ss := pb.PublicKey{
+		Type: pb.KeyType_Secp256k1,
+		Data: bts,
+	}
+	copy(ss.Data, bts)
+	finalKey, err := crypto.PublicKeyFromProto(&ss)
+	if err != nil {
+		return pk, err
+	}
+	return finalKey, nil
+
 }
 
 // UnmarshalSecp256k1PubKey unmarshals a secp256k1 pubKey
@@ -65,8 +79,8 @@ func RestorePrivateToKeyPair(privateKey []byte) (crypto.PrivKey, crypto.PubKey, 
 }
 
 // PublicToAddress returns the address of a public key
-func PublicToAddress(data []byte) string {
-	return hex.EncodeToString(Keccak256(data)[12:])
+func RawPublicToAddress(data []byte) string {
+	return hexutil.Encode(Keccak256(data)[12:])
 }
 
 //Keccak256 return sha3 of a given byte array
@@ -90,23 +104,4 @@ func Sha256HashHexBytes(data []byte) []byte {
 	hash := sha256.Sum256(data)
 	bts := hash[:]
 	return bts
-}
-
-// HashFile hashes the file with the sha256
-func HashFile(file io.Reader) []byte {
-	h := sha256.New()
-	if _, err := io.Copy(h, file); err != nil {
-		log.Fatal(err)
-	}
-	return h.Sum(nil)
-}
-
-// HashFilePath hashes the file that exists in the filePath with the sha256
-func HashFilePath(filePath string) ([]byte, error) {
-	if file, err := os.Open(filePath); err == nil {
-		defer file.Close()
-		return HashFile(file), nil
-	} else {
-		return nil, err
-	}
 }

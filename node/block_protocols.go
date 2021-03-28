@@ -1,9 +1,12 @@
 package node
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
+	"io/ioutil"
 	"sync"
 	"time"
 
@@ -32,149 +35,155 @@ type RemotePeer struct {
 // DownloadBlocksRange downloads a range of blocks
 func (rp *RemotePeer) DownloadBlocksRange(breq BlockQueryRequest) (bqr BlockQueryResponse, _ error) {
 	s, err := rp.BlockProtocol.Node.Host.NewStream(context.Background(), rp.Peer, BlockProtocolID)
+	c := bufio.NewReader(s)
+
 	if err != nil {
 		return bqr, err
 	}
 	rp.BlockStream = s
 
-	buf := []byte{}
 	defer rp.Disconn()
 	defer rp.BlockStream.Close()
 
 	future := time.Now().Add(10 * time.Second)
 	rp.BlockStream.SetDeadline(future)
 
-	bts, _ := proto.Marshal(&breq)
-	msg := make([]byte, 8+len(bts))
-	binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
-	copy(msg[8:], bts)
-	_, err = rp.BlockStream.Write(msg)
+	queryBts, err := proto.Marshal(&breq)
 	if err != nil {
-		rp.Disconn()
-		rp.BlockStream.Close() // this might not be required
+		log.Error(err)
+		return
+	}
+	msg := make([]byte, 8+len(queryBts))
+	binary.LittleEndian.PutUint64(msg, uint64(len(queryBts)))
+	copy(msg[8:], queryBts)
+
+	_, err = rp.BlockStream.Write(msg)
+
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	msgLengthBuffer := make([]byte, 8)
+	_, err = c.Read(msgLengthBuffer)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	lengthPrefix := int64(binary.LittleEndian.Uint64(msgLengthBuffer))
+	buf := make([]byte, lengthPrefix)
+
+	_, err = io.ReadFull(c, buf)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	if err := proto.Unmarshal(buf, &bqr); err != nil {
+		log.Error("error while unmarshalling data from stream: ", err)
 		return bqr, err
 	}
 
-	for {
-		// 100 KB buffer
-		chunk := make([]byte, 1024*100)
-		n, err := rp.BlockStream.Read(chunk)
+	rp.Height = bqr.NodeHeight
+	rp.BlockProtocol.SetHeighestBlock(rp.Height)
 
-		if err != nil {
-			return bqr, err
-		}
+	return bqr, nil
 
-		if n == 0 {
-			log.Println("read 0 bytes")
-			continue
-		}
+	// bts, _ := proto.Marshal(&breq)
+	// msg := make([]byte, 8+len(bts))
+	// binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
+	// copy(msg[8:], bts)
+	// _, err = rp.BlockStream.Write(msg)
+	// if err != nil {
+	// 	rp.Disconn()
+	// 	rp.BlockStream.Close() // this might not be required
+	// 	return bqr, err
+	// }
 
-		// copy the content of chunk to buffer
-		cut := chunk[0:n]
-		buf = append(buf, cut...)
+	// for {
+	// 	// 100 KB buffer
+	// 	chunk := make([]byte, 1024*100)
+	// 	n, err := rp.BlockStream.Read(chunk)
 
-		// we don't have the length prefix yet
-		if len(buf) < 8 {
-			continue
-		}
+	// 	if err != nil {
+	// 		return bqr, err
+	// 	}
 
-		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-		if int64(len(buf)) >= lengthPrefix+8 {
-			// bytes of the message
-			dt := buf[8 : lengthPrefix+8]
+	// 	if n == 0 {
+	// 		log.Println("read 0 bytes")
+	// 		continue
+	// 	}
 
-			if int64(len(buf)) > lengthPrefix+8 {
-				// cut the buff remaining and put in back to the buf
-				buf = buf[lengthPrefix+9:]
-			} else {
-				// reset the buf
-				buf = []byte{}
-			}
+	// 	// copy the content of chunk to buffer
+	// 	cut := chunk[0:n]
+	// 	buf = append(buf, cut...)
 
-			if err := proto.Unmarshal(dt, &bqr); err != nil {
-				log.Warn("error while unmarshalling data from stream: ", err)
+	// 	// we don't have the length prefix yet
+	// 	if len(buf) < 8 {
+	// 		continue
+	// 	}
 
-				return bqr, err
-			}
-			rp.Height = bqr.NodeHeight
-			rp.BlockProtocol.SetHeighestBlock(rp.Height)
+	// 	lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
+	// 	if int64(len(buf)) >= lengthPrefix+8 {
+	// 		// bytes of the message
+	// 		dt := buf[8 : lengthPrefix+8]
 
-			return bqr, nil
-		}
-	}
+	// 		if int64(len(buf)) > lengthPrefix+8 {
+	// 			// cut the buff remaining and put in back to the buf
+	// 			buf = buf[lengthPrefix+9:]
+	// 		} else {
+	// 			// reset the buf
+	// 			buf = []byte{}
+	// 		}
+
+	// 		if err := proto.Unmarshal(dt, &bqr); err != nil {
+	// 			log.Error("error while unmarshalling data from stream: ", err)
+
+	// 			return bqr, err
+	// 		}
+	// 		rp.Height = bqr.NodeHeight
+	// 		rp.BlockProtocol.SetHeighestBlock(rp.Height)
+
+	// 		return bqr, nil
+	// 	}
+	// }
 }
 
 // GetHeight gets remote peer
 func (rp *RemotePeer) GetHeight() (bqr NodeHeightResponse, _ error) {
 	s, err := rp.BlockProtocol.Node.Host.NewStream(context.Background(), rp.Peer, BlockHeightProtocolID)
+	rp.BlockHeightStream = s
 	if err != nil {
 		return bqr, err
 	}
-	rp.BlockHeightStream = s
-
-	buf := []byte{}
-	defer rp.Disconn()
-	defer rp.BlockHeightStream.Close()
-
 	future := time.Now().Add(10 * time.Second)
 	rp.BlockHeightStream.SetDeadline(future)
 
+	defer rp.Disconn()
+	defer rp.BlockHeightStream.Close()
+
 	bts, _ := proto.Marshal(&bqr)
-	msg := make([]byte, 8+len(bts))
-	binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
-	copy(msg[8:], bts)
-	_, err = rp.BlockHeightStream.Write(msg)
+	_, err = rp.BlockHeightStream.Write(bts)
 	if err != nil {
-		rp.Disconn()
-		rp.BlockHeightStream.Close() // this might not be required
 		return bqr, err
 	}
 
-	for {
-		// 100 KB buffer
-		chunk := make([]byte, 1024*100)
-		n, err := rp.BlockHeightStream.Read(chunk)
-		if err != nil {
-			return bqr, err
-		}
-
-		if n == 0 {
-			log.Println("read 0 bytes")
-			continue
-		}
-
-		// copy the content of chunk to buffer
-		cut := chunk[0:n]
-		buf = append(buf, cut...)
-
-		// we don't have the length prefix yet
-		if len(buf) < 8 {
-			continue
-		}
-
-		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-		if int64(len(buf)) >= lengthPrefix+8 {
-			// bytes of the message
-			dt := buf[8 : lengthPrefix+8]
-
-			if int64(len(buf)) > lengthPrefix+8 {
-				// cut the buff remaining and put in back to the buf
-				buf = buf[lengthPrefix+9:]
-			} else {
-				// reset the buf
-				buf = []byte{}
-			}
-
-			if err := proto.Unmarshal(dt, &bqr); err != nil {
-				log.Warn("error while unmarshalling data from stream: ", err)
-
-				return bqr, err
-			}
-			rp.Height = bqr.NodeHeight
-			rp.BlockProtocol.SetHeighestBlock(rp.Height)
-			return bqr, nil
-		}
+	buf, err := ioutil.ReadAll(rp.BlockHeightStream)
+	if err != nil {
+		log.Error(err)
+		return
 	}
+
+	if err := proto.Unmarshal(buf, &bqr); err != nil {
+		log.Error("error while unmarshalling data from stream: ", err)
+
+		return bqr, err
+	}
+	rp.Height = bqr.NodeHeight
+	rp.BlockProtocol.SetHeighestBlock(rp.Height)
+	return bqr, nil
+
 }
 
 // Disconn marks as disconnected
@@ -251,7 +260,6 @@ func (bp *BlockProtocol) GetNextPeer() (*RemotePeer, error) {
 		idx = 0
 	}
 
-	log.Println("GetNextPeer ", idx)
 	h := bp.RemotePeers[idx]
 	bp.RoundIndex++
 	return h, nil
@@ -305,94 +313,66 @@ func (bp *BlockProtocol) AddRemotePeer(rp *RemotePeer) bool {
 }
 
 func (bp *BlockProtocol) onBlockRequest(s network.Stream) {
-	// constantly read bytes from the stream
-	buf := []byte{}
+	c := bufio.NewReader(s)
+	defer s.Close()
 
-	for {
-		// 10 KB buffer
-		chunk := make([]byte, 1024*10)
-		n, err := s.Read(chunk)
+	msgLengthBuffer := make([]byte, 8)
+	_, err := c.Read(msgLengthBuffer)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
+	lengthPrefix := int64(binary.LittleEndian.Uint64(msgLengthBuffer))
+	buf := make([]byte, lengthPrefix)
+	// read the full message, or return an error
+	_, err = io.ReadFull(c, buf)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	bqr := BlockQueryRequest{}
+	if err := proto.Unmarshal(buf, &bqr); err != nil {
+		log.Error("error while unmarshalling data from stream: " + err.Error())
+		return
+	}
+
+	bqResponse := BlockQueryResponse{}
+	bqResponse.From = bqr.BlockNoFrom
+	bqResponse.To = bqr.BlockNoTo
+	nh := bp.Node.BlockChain.GetHeight()
+	bqResponse.NodeHeight = nh
+	if (bqr.BlockNoFrom > bqr.BlockNoTo) || (bqr.BlockNoTo > nh) {
+		bqResponse.Error = true
+	} else {
+		blocks, err := bp.Node.BlockChain.GetBlocksByRange(bqr.BlockNoFrom, bqr.BlockNoTo)
 		if err != nil {
-			s.Close()
-			return
-		}
-
-		if n == 0 {
-			continue
-		}
-
-		// copy the content of chunk to buffer
-		cut := chunk[0:n]
-		buf = append(buf, cut...)
-
-		// we don't have the length prefix yet
-		if len(buf) < 8 {
-			continue
-		}
-
-		lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-		if int64(len(buf)) >= lengthPrefix+8 {
-			// bytes of the message
-			dt := buf[8 : lengthPrefix+8]
-
-			if int64(len(buf)) > lengthPrefix+8 {
-				buf = buf[lengthPrefix+9:]
-			} else {
-				// reset the buf
-				buf = []byte{}
-			}
-
-			bqr := BlockQueryRequest{}
-			if err := proto.Unmarshal(dt, &bqr); err != nil {
-
-				s.Close()
-
-				return
-			}
-
-			bqResponse := BlockQueryResponse{}
-			bqResponse.From = bqr.BlockNoFrom
-			bqResponse.To = bqr.BlockNoTo
-			nh := bp.Node.BlockChain.GetHeight()
-			bqResponse.NodeHeight = nh
-			if (bqr.BlockNoFrom > bqr.BlockNoTo) || (bqr.BlockNoTo > nh) {
-				bqResponse.Error = true
-			} else {
-				blocks, err := bp.Node.BlockChain.GetBlocksByRange(bqr.BlockNoFrom, bqr.BlockNoTo)
-				if err != nil {
-					bqResponse.Error = true
-				} else {
-					bqResponse.Payload = blocks
-				}
-			}
-
-			queryBts, _ := proto.Marshal(&bqResponse)
-			msg := make([]byte, 8+len(queryBts))
-			binary.LittleEndian.PutUint64(msg, uint64(len(queryBts)))
-			copy(msg[8:], queryBts)
-
-			_, err = s.Write(msg)
-			if err != nil {
-				s.Close()
-				return
-			}
+			bqResponse.Error = true
+		} else {
+			bqResponse.Payload = blocks
 		}
 	}
+
+	queryBts, err := proto.Marshal(&bqResponse)
+	if err != nil {
+		log.Error("error while marshaling BlockQueryResponse")
+		return
+	}
+
+	msg := make([]byte, 8+len(queryBts))
+	binary.LittleEndian.PutUint64(msg, uint64(len(queryBts)))
+	copy(msg[8:], queryBts)
+	_, err = s.Write(msg)
+
 }
 
+// no needs to do framing (prepednging length+data) as we do not need the data from the other side
 func (bp *BlockProtocol) onBlockHeightRequest(s network.Stream) {
 	tmp := NodeHeightResponse{
 		NodeHeight: bp.Node.BlockChain.GetHeight(),
 	}
 	bts, _ := proto.Marshal(&tmp)
-	msg := make([]byte, 8+len(bts))
-	binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
-	copy(msg[8:], bts)
-	_, err := s.Write(msg)
-	if err != nil {
-		s.Close()
-		log.Warn(err)
-		return
-	}
+	s.Write(bts)
+	s.Close()
 }

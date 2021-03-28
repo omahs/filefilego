@@ -15,6 +15,7 @@ import (
 func DefaultConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Global: Global{
+			LogPathLine:         false,
 			LogLevel:            "TRACE",
 			DataDir:             DefaultDataDir(),
 			KeystoreDir:         filepath.Join(DefaultDataDir(), "keystore"),
@@ -27,6 +28,7 @@ func DefaultConfig() *GlobalConfig {
 			BinLayerDir:         "",
 			BinLayerToken:       "",
 			BinLayerFeesGB:      "1000000000000000000", // 1 Zaran
+			DataVerifier:        false,
 		},
 		Host: Host{},
 		RPC: RPC{
@@ -83,6 +85,11 @@ func LoadTomlConfig(ctx *cli.Context, cfg *GlobalConfig) {
 // ApplyFlags
 func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 	// Global
+
+	if ctx.GlobalIsSet(LogPathLine.Name) {
+		cfg.Global.LogPathLine = ctx.GlobalBool(LogPathLine.Name)
+	}
+
 	if ctx.GlobalIsSet(LogLevelFlag.Name) {
 		cfg.Global.LogLevel = ctx.GlobalString(LogLevelFlag.Name)
 	}
@@ -127,6 +134,10 @@ func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 
 	if ctx.GlobalIsSet(BinLayerFeesGB.Name) {
 		cfg.Global.BinLayerFeesGB = ctx.GlobalString(BinLayerFeesGB.Name)
+	}
+
+	if ctx.GlobalIsSet(DataVerifier.Name) {
+		cfg.Global.DataVerifier = ctx.GlobalBool(DataVerifier.Name)
 	}
 
 	// Host
