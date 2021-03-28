@@ -15,6 +15,7 @@ import (
 func DefaultConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Global: Global{
+			LogPathLine:         false,
 			LogLevel:            "TRACE",
 			DataDir:             DefaultDataDir(),
 			KeystoreDir:         filepath.Join(DefaultDataDir(), "keystore"),
@@ -84,6 +85,11 @@ func LoadTomlConfig(ctx *cli.Context, cfg *GlobalConfig) {
 // ApplyFlags
 func ApplyFlags(ctx *cli.Context, cfg *GlobalConfig) {
 	// Global
+
+	if ctx.GlobalIsSet(LogPathLine.Name) {
+		cfg.Global.LogPathLine = ctx.GlobalBool(LogPathLine.Name)
+	}
+
 	if ctx.GlobalIsSet(LogLevelFlag.Name) {
 		cfg.Global.LogLevel = ctx.GlobalString(LogLevelFlag.Name)
 	}

@@ -63,29 +63,29 @@ func (c *PubSubMetadata) Broadcast(data []byte) error {
 
 // Node represents all the node functionalities
 type Node struct {
-	Host                 host.Host
-	DataQueryProtocol    *DataQueryProtocol
-	DataVerifierProtocol *DataVerifierProtocol
-	BlockProtocol        *BlockProtocol
-	DHT                  *dht.IpfsDHT
-	RoutingDiscovery     *discovery.RoutingDiscovery
-	Gossip               PubSubMetadata
-	Keystore             *keystore.KeyStore
-	BlockChain           *Blockchain
-	isSyncing            bool
-	IsSyncingMux         *sync.Mutex
-	SearchEngine         *search.SearchEngine
-	BinLayerEngine       *binlayer.Engine
+	Host                     host.Host
+	DataQueryProtocol        *DataQueryProtocol
+	DataVerificationProtocol *DataVerificationProtocol
+	BlockProtocol            *BlockProtocol
+	DHT                      *dht.IpfsDHT
+	RoutingDiscovery         *discovery.RoutingDiscovery
+	Gossip                   PubSubMetadata
+	Keystore                 *keystore.KeyStore
+	BlockChain               *Blockchain
+	isSyncing                bool
+	IsSyncingMux             *sync.Mutex
+	SearchEngine             *search.SearchEngine
+	BinLayerEngine           *binlayer.Engine
 }
 
 func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine, bl *binlayer.Engine) (Node, error) {
 	node := Node{
-		DataQueryProtocol:    &DataQueryProtocol{},
-		BlockProtocol:        &BlockProtocol{},
-		DataVerifierProtocol: &DataVerifierProtocol{Enabled: false},
-		IsSyncingMux:         &sync.Mutex{},
-		SearchEngine:         se,
-		BinLayerEngine:       bl,
+		DataQueryProtocol:        &DataQueryProtocol{},
+		BlockProtocol:            &BlockProtocol{},
+		DataVerificationProtocol: &DataVerificationProtocol{VerifierMode: false},
+		IsSyncingMux:             &sync.Mutex{},
+		SearchEngine:             se,
+		BinLayerEngine:           bl,
 	}
 	host, err := libp2p.New(ctx,
 		libp2p.Identity(key.Private),
@@ -232,8 +232,8 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		if ok {
 
 			// if node is a data verifier
-			if n.DataVerifierProtocol.Enabled {
-				n.DataVerifierProtocol.HandleIncomingBlock(blc)
+			if n.DataVerificationProtocol.VerifierMode {
+				n.DataVerificationProtocol.HandleIncomingBlock(blc)
 			}
 
 			syncAgain, _ := n.BlockChain.AddBlockPool(blc)

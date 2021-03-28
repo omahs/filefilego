@@ -105,6 +105,21 @@ message DataContract {
     bytes RequesterNodePubKey = 3;
 }
 
+message DataContractsEnvelop {
+    repeated DataContract Contracts = 1;
+}
+
+message DataVerifierRequestPayload {
+    Transaction Transaction = 1;
+    bytes ContractHash = 2;
+}
+
+message NodeRangeDataRequest {
+    bytes Node = 1;
+    bytes ContractHash = 2;
+    uint64 From = 3;
+    uint64 To = 4;
+}
 
 message GossipPayload {
     enum GossipPayloadType {

@@ -1,6 +1,7 @@
 package main
 
 type Global struct {
+	LogPathLine         bool
 	LogLevel            string
 	DataDir             string
 	KeystoreDir         string

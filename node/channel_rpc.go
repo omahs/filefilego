@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"errors"
 	"math/rand"
@@ -91,12 +92,10 @@ func (api *ChannelAPI) GetNode(ctx context.Context, hash string) (response ChanN
 		if v == nil {
 			return errors.New("Node not found with given hash")
 		}
-
 		err := proto.Unmarshal(v, &response.Node)
 		if err != nil {
 			return err
 		}
-
 		// get parrent if not is not a channel
 		if response.Node.NodeType != ChanNodeType_CHANNEL {
 			v := b.Get([]byte(response.Node.ParentHash))
@@ -307,14 +306,15 @@ func (api *ChannelAPI) PrepareDataContract(ctx context.Context, hash string, fro
 			if err != nil {
 				return "", err
 			}
-
+			contractsEnvelop := DataContractsEnvelop{}
 			contract := DataContract{
 				HostResponse:        &v,
 				VerifierPubKey:      vpubKey,
 				RequesterNodePubKey: rawPubKeyBytes,
 			}
 
-			bts, err := proto.Marshal(&contract)
+			contractsEnvelop.Contracts = append(contractsEnvelop.Contracts, &contract)
+			bts, err := proto.Marshal(&contractsEnvelop)
 			if err != nil {
 				return "", err
 			}
@@ -335,4 +335,88 @@ func (api *ChannelAPI) PrepareDataContract(ctx context.Context, hash string, fro
 	}
 
 	return "", errors.New("Data provider not available")
+}
+
+type NodeToFileInfo struct {
+	Name string
+	Hash string
+	Size uint64
+}
+
+// ExtractFilesFromEntryFolder extracts files from folders and entry
+func (api *ChannelAPI) ExtractFilesFromEntryFolder(ctx context.Context, nodes string) (files []NodeToFileInfo, _ error) {
+	ns := strings.Split(nodes, ",")
+	availableNodes := []ChanNode{}
+	api.Node.BlockChain.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		for _, v := range ns {
+			if v == "" {
+				continue
+			}
+
+			bts := b.Get([]byte(v))
+			if bts == nil {
+				continue
+			}
+			tmp := ChanNode{}
+			proto.Unmarshal(bts, &tmp)
+
+			// we accept only entries, dirs and files
+			if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR || tmp.NodeType == ChanNodeType_FILE {
+				availableNodes = append(availableNodes, tmp)
+			}
+		}
+
+		return nil
+	})
+
+	queue := list.New()
+	for _, reqNode := range availableNodes {
+		queue.PushBack(reqNode)
+	}
+
+	err := api.Node.BlockChain.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		for queue.Len() > 0 {
+			el := queue.Front()
+			tmp := el.Value.(ChanNode)
+			if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR {
+				// get its childs and append to queue accordingly
+
+				c := tx.Bucket([]byte(nodeNodesBucket)).Cursor()
+				prefix := []byte(tmp.Hash)
+				for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+					// fmt.Printf("key=%s, value=%s\n", k, v)
+					val := b.Get(v)
+					if val == nil {
+						continue
+					}
+
+					tmpNode := ChanNode{}
+					err := proto.Unmarshal(val, &tmpNode)
+					if err != nil {
+						return err
+					}
+					queue.PushBack(tmpNode)
+				}
+
+			} else {
+				size, _ := hexutil.DecodeUint64(tmp.Size)
+				finfo := NodeToFileInfo{
+					Name: tmp.Name,
+					Hash: tmp.Hash,
+					Size: size,
+				}
+				files = append(files, finfo)
+			}
+			queue.Remove(el)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return files, err
+	}
+
+	return files, nil
 }

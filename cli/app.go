@@ -43,12 +43,14 @@ func init() {
 }
 
 func entry(ctx *cli.Context) error {
-
 	// crypto.EncryptFile()
 
 	// return nil
-
 	cfg := GetConfig(ctx)
+
+	if cfg.Global.LogPathLine {
+		log.SetReportCaller(true)
+	}
 
 	// check for node identity file first
 	key := &keystore.Key{}
@@ -104,6 +106,7 @@ func entry(ctx *cli.Context) error {
 		return err
 	}
 
+	node.DataVerificationProtocol = npkg.NewDataVerificationProtocol(&node)
 	if cfg.Global.DataVerifier {
 		// check if verifier
 		currentNodePubKey, err := node.Host.ID().ExtractPublicKey()
@@ -126,10 +129,9 @@ func entry(ctx *cli.Context) error {
 		}
 
 		log.Println("Data verification is enabled")
-
 		// register the and start protocol + handlers
+		node.DataVerificationProtocol.EnableVerifierMode()
 	}
-	node.DataVerifierProtocol = npkg.NewDataVerifierProtocol(&node)
 
 	// how can this node be reached
 	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", node.Host.ID().Pretty()))
@@ -225,6 +227,7 @@ func entry(ctx *cli.Context) error {
 }
 
 func main() {
+
 	if err := App.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -7,6 +7,11 @@ import (
 )
 
 var (
+	LogPathLine = cli.BoolFlag{
+		Name:  "logpathline",
+		Usage: "Logs include file path and line number",
+	}
+
 	LogLevelFlag = cli.StringFlag{
 		Name:  "loglevel",
 		Usage: "Logging level",
@@ -185,6 +190,7 @@ var AppFlags = []cli.Flag{
 		Name:  "config, c",
 		Usage: "Load configuration from `FILE`",
 	},
+	LogPathLine,
 	LogLevelFlag,
 	DataDirFlag,
 	KeystoreDirFlag,
