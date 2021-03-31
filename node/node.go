@@ -34,12 +34,11 @@ import (
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	mplex "github.com/libp2p/go-libp2p-mplex"
+	noise "github.com/libp2p/go-libp2p-noise"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	secio "github.com/libp2p/go-libp2p-secio"
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/multiformats/go-multiaddr"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/rs/cors"
 )
 
@@ -64,32 +63,36 @@ func (c *PubSubMetadata) Broadcast(data []byte) error {
 
 // Node represents all the node functionalities
 type Node struct {
-	Host              host.Host
-	DataQueryProtocol *DataQueryProtocol
-	BlockProtocol     *BlockProtocol
-	DHT               *dht.IpfsDHT
-	RoutingDiscovery  *discovery.RoutingDiscovery
-	Gossip            PubSubMetadata
-	Keystore          *keystore.KeyStore
-	BlockChain        *Blockchain
-	isSyncing         bool
-	IsSyncingMux      *sync.Mutex
-	SearchEngine      *search.SearchEngine
-	BinLayerEngine    *binlayer.Engine
+	Host                     host.Host
+	DataQueryProtocol        *DataQueryProtocol
+	DataVerificationProtocol *DataVerificationProtocol
+	BlockProtocol            *BlockProtocol
+	DHT                      *dht.IpfsDHT
+	RoutingDiscovery         *discovery.RoutingDiscovery
+	Gossip                   PubSubMetadata
+	Keystore                 *keystore.KeyStore
+	BlockChain               *Blockchain
+	isSyncing                bool
+	IsSyncingMux             *sync.Mutex
+	SearchEngine             *search.SearchEngine
+	BinLayerEngine           *binlayer.Engine
 }
 
 func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *keystore.KeyStore, se *search.SearchEngine, bl *binlayer.Engine) (Node, error) {
 	node := Node{
-		IsSyncingMux:   &sync.Mutex{},
-		SearchEngine:   se,
-		BinLayerEngine: bl,
+		DataQueryProtocol:        &DataQueryProtocol{},
+		BlockProtocol:            &BlockProtocol{},
+		DataVerificationProtocol: &DataVerificationProtocol{VerifierMode: false},
+		IsSyncingMux:             &sync.Mutex{},
+		SearchEngine:             se,
+		BinLayerEngine:           bl,
 	}
 	host, err := libp2p.New(ctx,
 		libp2p.Identity(key.Private),
 		libp2p.ListenAddrStrings(listenAddrPort),
 		libp2p.Ping(false),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
-		libp2p.Security(secio.ID, secio.New),
+		libp2p.Security(noise.ID, noise.New),
 		libp2p.DefaultTransports,
 		// Let's prevent our peer from having too many
 		libp2p.ConnectionManager(connmgr.NewConnManager(
@@ -121,14 +124,53 @@ func NewNode(ctx context.Context, listenAddrPort string, key *keystore.Key, ks *
 	return node, nil
 }
 
+// SignData signs data with nodes private key
+func (n *Node) SignData(data []byte) ([]byte, error) {
+	localKey := n.Host.Peerstore().PrivKey(n.Host.ID())
+	res, err := localKey.Sign(data)
+	return res, err
+}
+
+// VerifyData given a pubkey and signature + data returns the verification result
+func (n *Node) VerifyData(data []byte, signature []byte, peerID peer.ID, pubKeyData []byte) bool {
+	key, err := crypto.PublicKeyFromRawHex(hexutil.Encode(pubKeyData))
+	if err != nil {
+		log.Error(err, "Failed to extract key from message key data")
+		return false
+	}
+
+	// extract node id from the provided public key
+	idFromKey, err := peer.IDFromPublicKey(key)
+
+	if err != nil {
+		log.Error(err, "Failed to extract peer id from public key")
+		return false
+	}
+
+	// verify that message author node id matches the provided node public key
+	if idFromKey != peerID {
+		log.Error(err, "Node id and provided public key mismatch")
+		return false
+	}
+
+	res, err := key.Verify(data, signature)
+	if err != nil {
+		log.Error(err, "Error authenticating data")
+		return false
+	}
+
+	return res
+}
+
 // GetReachableAddr returns full add
 func (n *Node) GetReachableAddr() string {
-	hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
-	for _, lid := range n.Host.Addrs() {
-		fulladdr := lid.Encapsulate(hostAddr)
-		return fulladdr.String()
-	}
-	return ""
+	return peer.Encode(n.Host.ID())
+	// hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ipfs/%s", n.Host.ID().Pretty()))
+	// for _, lid := range n.Host.Addrs() {
+	// 	fulladdr := lid.Encapsulate(hostAddr)
+	// 	return fulladdr.String()
+	// }
+	// return ""
 }
 
 // SetSyncing sets current status
@@ -147,14 +189,15 @@ func (n *Node) GetSyncing() bool {
 }
 
 func (n *Node) HandleGossip(msg *pubsub.Message) error {
-	if n.Host.ID().Pretty() == msg.ReceivedFrom.Pretty() {
-		return nil
-	}
+
 	gossip := GossipPayload{}
 	if err := proto.Unmarshal(msg.Data, &gossip); err != nil {
 		return err
 	}
 	if gossip.Type == GossipPayload_TRANSACTION {
+		if n.Host.ID().String() == msg.ReceivedFrom.String() {
+			return nil
+		}
 		tx := UnserializeTransaction(gossip.Payload)
 		ok, err := n.BlockChain.IsValidTransaction(tx)
 		if err != nil {
@@ -173,6 +216,9 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		}
 
 	} else if gossip.Type == GossipPayload_BLOCK {
+		if n.Host.ID().String() == msg.ReceivedFrom.String() {
+			return nil
+		}
 		// node is syncing
 		if n.GetSyncing() {
 			return nil
@@ -184,7 +230,16 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 		ok := ValidateBlock(blc)
 		if ok {
-			n.BlockChain.AddBlockPool(blc)
+
+			// if node is a data verifier
+			if n.DataVerificationProtocol.VerifierMode {
+				n.DataVerificationProtocol.HandleIncomingBlock(blc)
+			}
+
+			syncAgain, _ := n.BlockChain.AddBlockPool(blc)
+			if syncAgain {
+				n.Sync(context.Background())
+			}
 
 		} else {
 			log.Warn("Got an invalid block")
@@ -194,6 +249,11 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 		dqr := DataQueryRequest{}
 		if err := proto.Unmarshal(gossip.Payload, &dqr); err != nil {
 			log.Warn("Got an invalid DATA_QUERY_REQUEST")
+			return err
+		}
+
+		fromPeer, err := peer.Decode(dqr.FromPeerAddr)
+		if err != nil {
 			return err
 		}
 
@@ -284,6 +344,12 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				return err
 			}
 
+			// stop if there are unavailable nodes
+			if len(unavailableNodes) > 0 {
+
+				return nil
+			}
+
 			if totalSize > 0 {
 				var feesGB, _ = new(big.Int).SetString(n.BinLayerEngine.FeesPerGB, 10)
 				var gbInBytes, _ = new(big.Int).SetString("1073741824", 10)
@@ -292,28 +358,67 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 				factor := gbInBytes.Div(gbInBytes, tsBig)
 				finalAmount := feesGB.Div(feesGB, factor)
 				finalAmountHex := hexutil.EncodeBig(finalAmount)
+				pubKeyBytes, err := n.GetPublicKeyBytes()
+				if err != nil {
+					log.Error("Unable to get public key bytes")
+					return nil
+				}
+
+				availableNodesBytes := [][]byte{}
+				for _, availableNode := range availableNodes {
+					bt, _ := hexutil.Decode(availableNode.Hash)
+					availableNodesBytes = append(availableNodesBytes, bt)
+				}
 
 				dqres := DataQueryResponse{
-					UnavailableNodes:  unavailableNodes,
+					Nodes:             availableNodesBytes,
 					FromPeerAddr:      n.GetReachableAddr(),
 					TotalFeesRequired: finalAmountHex,
+					Hash:              dqr.Hash,
+					PubKey:            pubKeyBytes,
 					Timestamp:         time.Now().Unix(),
 				}
 
-				ctx := context.Background()
-				pinfo, err := n.ConnectToPeerWithMultiaddr(dqr.FromPeerAddr, ctx)
-				if err == nil {
-					success := n.DataQueryProtocol.SendDataQueryResponse(pinfo, &dqres)
-					if success {
-						log.Println("Successfully sent message back to initiator peer")
-					}
-				} else {
+				bts, err := proto.Marshal(&dqres)
+				if err != nil {
 					log.Warn(err)
+					return nil
 				}
 
-				log.Println(err, "total amount ", finalAmountHex, " items ", totalCountItems, dqres)
-			}
+				signedBits, err := n.SignData(bts)
+				if err != nil {
+					log.Warn(err)
+					return nil
+				}
 
+				dqres.Signature = signedBits
+
+				ctx := context.Background()
+
+				rpdecoded, err := peer.Decode(dqr.FromPeerAddr)
+				if err != nil {
+					log.Warn(err)
+					return nil
+				}
+
+				if fromPeer == n.Host.ID() {
+
+					n.DataQueryProtocol.PutQueryResponse(dqres.Hash, dqres)
+				} else {
+					log.Println("finding remote peer ", rpdecoded.String())
+					pinfo, err := n.DHT.FindPeer(ctx, rpdecoded)
+
+					if err == nil {
+						success := n.DataQueryProtocol.SendDataQueryResponse(&pinfo, &dqres)
+						if success {
+							log.Println("Successfully sent message back to initiator peer")
+						}
+					} else {
+						log.Warn(err)
+					}
+				}
+
+			}
 			// s, err := n.Host.NewStream(ctx, p, DataQueryServiceID)
 		}
 	}
@@ -361,6 +466,44 @@ func (n *Node) GetAddrs() ([]multiaddr.Multiaddr, error) {
 	return peer.AddrInfoToP2pAddrs(&peerInfo)
 }
 
+// GetPublicKey get nodes public key in bytes
+func (n *Node) GetPublicKeyBytes() (dt []byte, _ error) {
+	pkey, err := n.Host.ID().ExtractPublicKey()
+	if err != nil {
+		return dt, err
+	}
+
+	bts, err := pkey.Raw()
+	if err != nil {
+		return dt, err
+	}
+
+	return bts, nil
+}
+
+// FindPeers used DHT to discover addinfo of peers
+func (n *Node) FindPeers(peerIDs []peer.ID) []peer.AddrInfo {
+	discoveredPeers := []peer.AddrInfo{}
+	var wg sync.WaitGroup
+	mutex := sync.Mutex{}
+	for _, peerAddr := range peerIDs {
+		wg.Add(1)
+		go func(peer peer.ID) {
+			defer wg.Done()
+			ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+			addr, err := n.DHT.FindPeer(ctx, peer)
+			if err == nil {
+				mutex.Lock()
+				discoveredPeers = append(discoveredPeers, addr)
+				mutex.Unlock()
+			}
+		}(peerAddr)
+	}
+	wg.Wait()
+	return discoveredPeers
+}
+
+// Bootstrap connects to a list of bootstrap nodes
 func (n *Node) Bootstrap(ctx context.Context, bootstrapPeers []string) error {
 	if err := n.DHT.Bootstrap(ctx); err != nil {
 		return err
@@ -385,6 +528,7 @@ func (n *Node) Bootstrap(ctx context.Context, bootstrapPeers []string) error {
 	return nil
 }
 
+// ConnectToPeerWithMultiaddr connects to a node given its full address
 func (n *Node) ConnectToPeerWithMultiaddr(remoteAddr string, ctx context.Context) (*peer.AddrInfo, error) {
 
 	addr, err := multiaddr.NewMultiaddr(remoteAddr)
@@ -402,12 +546,14 @@ func (n *Node) ConnectToPeerWithMultiaddr(remoteAddr string, ctx context.Context
 	return p, nil
 }
 
-func (n *Node) Advertise(ctx context.Context) {
+// AdvertiseRendezvous places a cid to the routingdiscovery which internally uses the dht
+func (n *Node) AdvertiseRendezvous(ctx context.Context) {
 	n.RoutingDiscovery = discovery.NewRoutingDiscovery(n.DHT)
 	discovery.Advertise(ctx, n.RoutingDiscovery, "FINDMEHERE")
 }
 
-func (n *Node) FindPeers(ctx context.Context) (adrs []peer.AddrInfo, err error) {
+// FindRendezvousPeers retuns peers that have announced specific cid
+func (n *Node) FindRendezvousPeers(ctx context.Context) (adrs []peer.AddrInfo, err error) {
 	peerChan, err := n.RoutingDiscovery.FindPeers(ctx, "FINDMEHERE")
 	if err != nil {
 		return adrs, err
@@ -428,20 +574,100 @@ func (n *Node) Peers() peer.IDSlice {
 
 // Sync the blockchain with other nodes
 func (n *Node) Sync(ctx context.Context) error {
+	n.BlockProtocol.Reset()
+	n.BlockChain.ClearBlockPool(false)
 
+	syncAgain := false
 	if n.GetSyncing() {
 		return nil
 	}
 
 	n.SetSyncing(true)
-	// n.BlockProtocol.ClearRemotePeers()
+	var wg sync.WaitGroup
 
 	for _, p := range n.Peers() {
-		if n.Host.ID() != p {
-			n.BlockProtocol.AddRemotePeer(p)
+		if p.String() == n.Host.ID().String() {
+			continue
+		}
+		wg.Add(1)
+		go func(p peer.ID, wg *sync.WaitGroup) {
+			rh, err := NewRemotePeer(n, p)
+			if err == nil {
+
+				_, err := rh.GetHeight()
+				if err == nil {
+					n.BlockProtocol.AddRemotePeer(rh)
+				} else {
+					log.Warn(err)
+				}
+			} else {
+				log.Warn(err)
+			}
+			wg.Done()
+		}(p, &wg)
+	}
+
+	log.Println("connecting to peers for syncing")
+	wg.Wait()
+	log.Println("syncing with nodes: ", len(n.BlockProtocol.RemotePeers))
+
+	// while this blockchain is behind the remote ones
+	if len(n.BlockProtocol.RemotePeers) > 0 {
+		for n.BlockChain.GetHeight() <= n.BlockProtocol.GetHeighestBlock() {
+			request := BlockQueryRequest{
+				BlockNoFrom: n.BlockChain.GetHeight() + 1,
+				BlockNoTo:   n.BlockChain.GetHeight() + 100,
+			}
+
+			// get the remote node
+			// and query for block range
+			rh, err := n.BlockProtocol.GetNextPeer()
+
+			if err != nil {
+				break
+			}
+
+			if request.BlockNoTo > rh.Height {
+				request.BlockNoTo = rh.Height
+			}
+
+			if n.BlockChain.GetHeight() > rh.Height {
+				n.BlockProtocol.RemovePeer(rh)
+				continue
+			}
+
+			blockRes, err := rh.DownloadBlocksRange(request)
+			if err != nil || blockRes.Error {
+				n.BlockProtocol.RemovePeer(rh)
+			}
+
+			if len(blockRes.Payload) > 0 {
+				log.Printf("Downloaded %d blocks from peer: %s\n", len(blockRes.Payload), rh.Peer.String())
+				for _, b := range blockRes.Payload {
+
+					syncAgain, err = n.BlockChain.AddBlockPool(*b)
+					if err != nil {
+						log.Error("Problem adding block to current chain ", err)
+					}
+
+					if syncAgain {
+						break
+					}
+				}
+			}
+
+			if blockRes.NodeHeight <= n.BlockChain.GetHeight() {
+				n.BlockProtocol.RemovePeer(rh)
+			}
 		}
 	}
-	// n.SetSyncing(false)
+
+	n.SetSyncing(false)
+	log.Println("sync finished")
+
+	if syncAgain {
+		n.Sync(ctx)
+	}
 	return nil
 }
 

@@ -5,9 +5,26 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/filefilego/filefilego/crypto"
 	log "github.com/sirupsen/logrus"
 	proto "google.golang.org/protobuf/proto"
 )
+
+// GetHash returns a hash of the contract
+func (c *DataContract) GetHash() []byte {
+	data := bytes.Join(
+		[][]byte{
+			c.RequesterNodePubKey,
+			c.VerifierPubKey,
+			c.HostResponse.PubKey,
+			c.HostResponse.Signature,
+			bytes.Join(c.HostResponse.Nodes, []byte{}),
+		},
+		[]byte{},
+	)
+	// data, _ := proto.Marshal(c)
+	return crypto.Sha256HashHexBytes(data)
+}
 
 // GetTransactionID gets a hash of a transaction
 func GetTransactionID(tx *Transaction) []byte {
@@ -48,12 +65,12 @@ func UnserializeTransaction(data []byte) Transaction {
 }
 
 // IntToHex converts an int64 to a byte array
-func IntToHex(num int64) []byte {
+func IntToHex(num int64) ([]byte, error) {
 	buff := new(bytes.Buffer)
 	err := binary.Write(buff, binary.BigEndian, num)
 	if err != nil {
-		log.Panic(err)
+		return buff.Bytes(), err
 	}
 
-	return buff.Bytes()
+	return buff.Bytes(), nil
 }

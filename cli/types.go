@@ -1,6 +1,7 @@
 package main
 
 type Global struct {
+	LogPathLine         bool
 	LogLevel            string
 	DataDir             string
 	KeystoreDir         string
@@ -13,6 +14,7 @@ type Global struct {
 	BinLayerDir         string
 	BinLayerToken       string
 	BinLayerFeesGB      string
+	DataVerifier        bool
 }
 
 // Host

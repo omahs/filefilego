@@ -7,6 +7,11 @@ import (
 )
 
 var (
+	LogPathLine = cli.BoolFlag{
+		Name:  "logpathline",
+		Usage: "Logs include file path and line number",
+	}
+
 	LogLevelFlag = cli.StringFlag{
 		Name:  "loglevel",
 		Usage: "Logging level",
@@ -67,6 +72,11 @@ var (
 	BinLayerFeesGB = cli.StringFlag{
 		Name:  "binlayerfeesgb",
 		Usage: "Binlayer fees (ARAN) per GB of data",
+	}
+
+	DataVerifier = cli.BoolFlag{
+		Name:  "verify",
+		Usage: "Enable data verification(if verifier in genesis)",
 	}
 
 	RPCFlag = cli.BoolFlag{
@@ -180,6 +190,7 @@ var AppFlags = []cli.Flag{
 		Name:  "config, c",
 		Usage: "Load configuration from `FILE`",
 	},
+	LogPathLine,
 	LogLevelFlag,
 	DataDirFlag,
 	KeystoreDirFlag,
@@ -193,6 +204,7 @@ var AppFlags = []cli.Flag{
 	BinLayerDir,
 	BinLayerToken,
 	BinLayerFeesGB,
+	DataVerifier,
 
 	RPCFlag,
 	RPCServicesFlag,

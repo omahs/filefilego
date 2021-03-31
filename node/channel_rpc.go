@@ -2,14 +2,19 @@ package node
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"errors"
+	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/filefilego/filefilego/common"
+	"github.com/filefilego/filefilego/common/hexutil"
+	"github.com/filefilego/filefilego/crypto"
 	"github.com/golang/protobuf/proto"
+	"github.com/libp2p/go-libp2p-core/peer"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -87,12 +92,10 @@ func (api *ChannelAPI) GetNode(ctx context.Context, hash string) (response ChanN
 		if v == nil {
 			return errors.New("Node not found with given hash")
 		}
-
 		err := proto.Unmarshal(v, &response.Node)
 		if err != nil {
 			return err
 		}
-
 		// get parrent if not is not a channel
 		if response.Node.NodeType != ChanNodeType_CHANNEL {
 			v := b.Get([]byte(response.Node.ParentHash))
@@ -235,7 +238,185 @@ func (api *ChannelAPI) DataQuery(ctx context.Context, nodes string) (string, err
 		return "", err
 	}
 
+	api.Node.DataQueryProtocol.PutQueryHistory(dqr.Hash, dqr)
+
 	api.Node.Gossip.Broadcast(bts)
 
 	return dataHash, nil
+}
+
+// DataQueryResult returns a result of the requests
+func (api *ChannelAPI) DataQueryResult(ctx context.Context, hash string) ([]DataQueryResponse, error) {
+	res, ok := api.Node.DataQueryProtocol.GetQueryResponse(hash)
+	if !ok {
+		return res, errors.New("response not available")
+	}
+	return res, nil
+}
+
+// PrepareDataContract prepares a data contract
+func (api *ChannelAPI) PrepareDataContract(ctx context.Context, hash string, fromPeer string) (string, error) {
+	res, ok := api.Node.DataQueryProtocol.GetQueryResponse(hash)
+	if !ok {
+		return "", errors.New("response not available")
+	}
+
+	for _, v := range res {
+		if v.FromPeerAddr == fromPeer {
+
+			peerIDs := []peer.ID{}
+			for _, v := range GetBlockchainSettings().Verifiers {
+				if v.DataVerifier {
+					pubKey, err := crypto.PublicKeyFromRawHex(v.PublicKey)
+					if err != nil {
+						continue
+					}
+
+					id, err := peer.IDFromPublicKey(pubKey)
+					if err != nil {
+						continue
+					}
+					peerIDs = append(peerIDs, id)
+				}
+			}
+
+			accessibleVerifiers := api.Node.FindPeers(peerIDs)
+			if len(accessibleVerifiers) == 0 {
+				return "", errors.New("Unable to find verifiers")
+			}
+			randomIndex := rand.Intn(len(accessibleVerifiers))
+			verifier := accessibleVerifiers[randomIndex]
+			vpid := verifier.ID
+
+			vpubKey := []byte{}
+			for _, v := range GetBlockchainSettings().Verifiers {
+				if v.DataVerifier {
+					pk, err := crypto.PublicKeyFromRawHex(v.PublicKey)
+					if err != nil {
+						continue
+					}
+					pid, _ := peer.IDFromPublicKey(pk)
+					if pid.String() == vpid.String() {
+						vpubKey, _ = hexutil.Decode(v.PublicKey)
+					}
+				}
+			}
+
+			rawPubKeyBytes, err := api.Node.GetPublicKeyBytes()
+			if err != nil {
+				return "", err
+			}
+			contractsEnvelop := DataContractsEnvelop{}
+			contract := DataContract{
+				HostResponse:        &v,
+				VerifierPubKey:      vpubKey,
+				RequesterNodePubKey: rawPubKeyBytes,
+			}
+
+			contractsEnvelop.Contracts = append(contractsEnvelop.Contracts, &contract)
+			bts, err := proto.Marshal(&contractsEnvelop)
+			if err != nil {
+				return "", err
+			}
+
+			pl := TransactionDataPayload{
+				Type:    TransactionDataPayloadType_DATA_CONTRACT,
+				Payload: bts,
+			}
+
+			plBits, err := proto.Marshal(&pl)
+			if err != nil {
+				return "", err
+			}
+
+			return hexutil.Encode(plBits), nil
+
+		}
+	}
+
+	return "", errors.New("Data provider not available")
+}
+
+type NodeToFileInfo struct {
+	Name string
+	Hash string
+	Size uint64
+}
+
+// ExtractFilesFromEntryFolder extracts files from folders and entry
+func (api *ChannelAPI) ExtractFilesFromEntryFolder(ctx context.Context, nodes string) (files []NodeToFileInfo, _ error) {
+	ns := strings.Split(nodes, ",")
+	availableNodes := []ChanNode{}
+	api.Node.BlockChain.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		for _, v := range ns {
+			if v == "" {
+				continue
+			}
+
+			bts := b.Get([]byte(v))
+			if bts == nil {
+				continue
+			}
+			tmp := ChanNode{}
+			proto.Unmarshal(bts, &tmp)
+
+			// we accept only entries, dirs and files
+			if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR || tmp.NodeType == ChanNodeType_FILE {
+				availableNodes = append(availableNodes, tmp)
+			}
+		}
+
+		return nil
+	})
+
+	queue := list.New()
+	for _, reqNode := range availableNodes {
+		queue.PushBack(reqNode)
+	}
+
+	err := api.Node.BlockChain.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(nodesBucket))
+		for queue.Len() > 0 {
+			el := queue.Front()
+			tmp := el.Value.(ChanNode)
+			if tmp.NodeType == ChanNodeType_ENTRY || tmp.NodeType == ChanNodeType_DIR {
+				// get its childs and append to queue accordingly
+
+				c := tx.Bucket([]byte(nodeNodesBucket)).Cursor()
+				prefix := []byte(tmp.Hash)
+				for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+					// fmt.Printf("key=%s, value=%s\n", k, v)
+					val := b.Get(v)
+					if val == nil {
+						continue
+					}
+
+					tmpNode := ChanNode{}
+					err := proto.Unmarshal(val, &tmpNode)
+					if err != nil {
+						return err
+					}
+					queue.PushBack(tmpNode)
+				}
+
+			} else {
+				size, _ := hexutil.DecodeUint64(tmp.Size)
+				finfo := NodeToFileInfo{
+					Name: tmp.Name,
+					Hash: tmp.Hash,
+					Size: size,
+				}
+				files = append(files, finfo)
+			}
+			queue.Remove(el)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return files, err
+	}
+
+	return files, nil
 }
