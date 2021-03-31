@@ -89,65 +89,6 @@ func (rp *RemotePeer) DownloadBlocksRange(breq BlockQueryRequest) (bqr BlockQuer
 	rp.BlockProtocol.SetHeighestBlock(rp.Height)
 
 	return bqr, nil
-
-	// bts, _ := proto.Marshal(&breq)
-	// msg := make([]byte, 8+len(bts))
-	// binary.LittleEndian.PutUint64(msg, uint64(len(bts)))
-	// copy(msg[8:], bts)
-	// _, err = rp.BlockStream.Write(msg)
-	// if err != nil {
-	// 	rp.Disconn()
-	// 	rp.BlockStream.Close() // this might not be required
-	// 	return bqr, err
-	// }
-
-	// for {
-	// 	// 100 KB buffer
-	// 	chunk := make([]byte, 1024*100)
-	// 	n, err := rp.BlockStream.Read(chunk)
-
-	// 	if err != nil {
-	// 		return bqr, err
-	// 	}
-
-	// 	if n == 0 {
-	// 		log.Println("read 0 bytes")
-	// 		continue
-	// 	}
-
-	// 	// copy the content of chunk to buffer
-	// 	cut := chunk[0:n]
-	// 	buf = append(buf, cut...)
-
-	// 	// we don't have the length prefix yet
-	// 	if len(buf) < 8 {
-	// 		continue
-	// 	}
-
-	// 	lengthPrefix := int64(binary.LittleEndian.Uint64(buf[0:8]))
-	// 	if int64(len(buf)) >= lengthPrefix+8 {
-	// 		// bytes of the message
-	// 		dt := buf[8 : lengthPrefix+8]
-
-	// 		if int64(len(buf)) > lengthPrefix+8 {
-	// 			// cut the buff remaining and put in back to the buf
-	// 			buf = buf[lengthPrefix+9:]
-	// 		} else {
-	// 			// reset the buf
-	// 			buf = []byte{}
-	// 		}
-
-	// 		if err := proto.Unmarshal(dt, &bqr); err != nil {
-	// 			log.Error("error while unmarshalling data from stream: ", err)
-
-	// 			return bqr, err
-	// 		}
-	// 		rp.Height = bqr.NodeHeight
-	// 		rp.BlockProtocol.SetHeighestBlock(rp.Height)
-
-	// 		return bqr, nil
-	// 	}
-	// }
 }
 
 // GetHeight gets remote peer

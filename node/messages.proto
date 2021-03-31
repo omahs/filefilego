@@ -89,14 +89,13 @@ message DataQueryRequest {
 }
 
 message DataQueryResponse {
-    repeated string UnavailableNodes = 1;
-    string FromPeerAddr = 2;
-    string TotalFeesRequired = 3;
-    string Hash = 4;
-    bytes PubKey = 5;
-    bytes Signature = 6;
-    repeated bytes Nodes = 7;
-    int64 Timestamp = 8;
+    string FromPeerAddr = 1;
+    string TotalFeesRequired = 2;
+    string Hash = 3;
+    bytes PubKey = 4;
+    bytes Signature = 5;
+    repeated bytes Nodes = 6;
+    int64 Timestamp = 7;
 }
 
 message DataContract {
@@ -114,7 +113,7 @@ message DataVerifierRequestPayload {
     bytes ContractHash = 2;
 }
 
-message NodeRangeDataRequest {
+message NodeDataRangeRequest {
     bytes Node = 1;
     bytes ContractHash = 2;
     uint64 From = 3;

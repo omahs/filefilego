@@ -62,7 +62,7 @@ func encrypt(inFile io.ReadSeekCloser, outputWriter io.WriteCloser, stream ciphe
 	// defer inFile.Close()
 	// defer outputWriter.Close()
 
-	buf := make([]byte, 1024)
+	buf := make([]byte, 2048)
 	for {
 		n, err := inFile.Read(buf)
 		if n > 0 {

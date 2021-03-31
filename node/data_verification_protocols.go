@@ -1,9 +1,12 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"container/list"
 	"context"
+	"encoding/binary"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -23,15 +26,29 @@ import (
 // DataVerifierRequestID represents a request to get interested verifiers
 const DataVerifierRequestID = "/ffg/dv_verifier_req/1.0.0"
 
-// NodeRangeDataRequestID used to allow downloader ask for range of bytes
-const NodeRangeDataRequestID = "/ffg/dv_range_data_req/1.0.0"
+// NodeDataRangeRequestID used to allow downloader ask for range of bytes
+const NodeDataRangeRequestID = "/ffg/dv_range_data_req/1.0.0"
 
 // KeyRequestFromVerifierID this protocol is runned by verifier
 const KeyRequestFromVerifierID = "/ffg/dv_key_req/1.0.0"
 
+//
+type PeerContext int32
+
+const (
+	PeerContextType_None       PeerContext = 0
+	PeerContextType_Verifier   PeerContext = 1
+	PeerContextType_Host       PeerContext = 2
+	PeerContextType_Downloader PeerContext = 3
+)
+
 type ContractTransaction struct {
-	tx        Transaction
-	timestamp time.Time
+	verifierID   peer.ID
+	hostID       peer.ID
+	downloaderID peer.ID
+	nodeContext  PeerContext
+	tx           Transaction
+	timestamp    time.Time
 }
 
 // DataVerificationProtocol wraps the protocols
@@ -40,6 +57,18 @@ type DataVerificationProtocol struct {
 	Node         *Node
 	contMutex    sync.Mutex
 	contracts    map[string]ContractTransaction
+}
+
+// GetContractTransaction returns a a contract transaction
+func (dqp *DataVerificationProtocol) GetContractTransaction(hash string) (ContractTransaction, bool) {
+	dqp.contMutex.Lock()
+	defer dqp.contMutex.Unlock()
+	c, ok := dqp.contracts[hash]
+	if !ok {
+		return c, false
+	}
+
+	return c, true
 }
 
 // GetContract returns a contract that has been validated before
@@ -55,14 +84,8 @@ func (dqp *DataVerificationProtocol) GetContract(hash string) (dataContract Data
 	dcs, _ := dqp.extractContractsFromTransaction(&c.tx)
 
 	for _, dc := range dcs {
-		bts, err := proto.Marshal(dc)
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
 		hashContract, _ := hexutil.Decode(hash)
-		if bytes.Equal(crypto.Sha256HashHexBytes(bts), hashContract) {
+		if bytes.Equal(dc.GetHash(), hashContract) {
 			dataContract = *dc
 			break
 		}
@@ -72,21 +95,23 @@ func (dqp *DataVerificationProtocol) GetContract(hash string) (dataContract Data
 	return dataContract, true
 }
 
-func (dqp *DataVerificationProtocol) AddContract(contract DataContract, tx Transaction) bool {
+func (dqp *DataVerificationProtocol) AddContract(contract DataContract, tx Transaction, nContext PeerContext, hostID peer.ID, downloaderID peer.ID) (string, bool) {
 	dqp.contMutex.Lock()
 	defer dqp.contMutex.Unlock()
-	bts, _ := proto.Marshal(&contract)
-	contractHash := hexutil.Encode(crypto.Sha256HashHexBytes(bts))
+	contractHash := hexutil.Encode(contract.GetHash())
 	_, ok := dqp.contracts[contractHash]
 	if ok {
 		// contract already exists in the map
-		return false
+		return contractHash, false
 	}
 	dqp.contracts[contractHash] = ContractTransaction{
-		tx:        tx,
-		timestamp: time.Now(),
+		hostID:       hostID,
+		downloaderID: downloaderID,
+		nodeContext:  nContext,
+		tx:           tx,
+		timestamp:    time.Now(),
 	}
-	return true
+	return contractHash, true
 }
 
 // onDataVerifierRequest handles one contract at a time using tx and hash of contract
@@ -118,22 +143,13 @@ func (dqp *DataVerificationProtocol) onDataVerifierRequest(s network.Stream) {
 	foundContract := DataContract{}
 
 	for _, dc := range dcs {
-
-		bts, err := proto.Marshal(dc)
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
-		if bytes.Equal(crypto.Sha256HashHexBytes(bts), dvrp.ContractHash) {
+		if bytes.Equal(dc.GetHash(), dvrp.ContractHash) {
 			foundContract = *dc
 			break
 		}
-
 	}
 
-	// hostID, downloaderID, ok := dqp.verifyContract(dc, &tx)
-	_, _, ok = dqp.verifyContract(foundContract, tx)
+	hostID, downloaderID, ok := dqp.verifyContract(foundContract, tx)
 	if !ok {
 		log.Warn("contract is invalid")
 		return
@@ -156,14 +172,21 @@ func (dqp *DataVerificationProtocol) onDataVerifierRequest(s network.Stream) {
 		return
 	}
 
-	dqp.AddContract(foundContract, *tx)
-
 	// find is current node is downloader or hoster
 	currentNodePubKeyRawBytes, _ := dqp.Node.GetPublicKeyBytes()
 	if bytes.Equal(foundContract.RequesterNodePubKey, currentNodePubKeyRawBytes) {
-		log.Println("I am the downloader")
+		contractHash, _ := dqp.AddContract(foundContract, *tx, PeerContextType_Downloader, hostID, downloaderID)
+		log.Println("data downloader")
+
+		contractHashBytes, _ := hexutil.Decode(contractHash)
+		nodeTodownload, _ := hexutil.Decode("0x4f76b4f3a51dfb8549cbf7f675120e3099180c56ebb4c9a21992a225efa42ea4")
+		time.Sleep(2 * time.Second)
+		ok := dqp.RequestNodeDataRange(contractHashBytes, nodeTodownload, 0, 0)
+		log.Println("result of file download ", ok)
+
 	} else if bytes.Equal(foundContract.HostResponse.PubKey, currentNodePubKeyRawBytes) {
-		log.Println("I am the hoster")
+		dqp.AddContract(foundContract, *tx, PeerContextType_Host, hostID, downloaderID)
+		log.Println("data hoster")
 	}
 }
 
@@ -181,7 +204,8 @@ func (dqp *DataVerificationProtocol) GetFileNodesFromContract(contract DataContr
 				continue
 			}
 
-			bts := b.Get(v)
+			bts := b.Get([]byte(hexutil.Encode(v)))
+
 			if bts == nil {
 				continue
 			}
@@ -248,16 +272,96 @@ func (dqp *DataVerificationProtocol) GetFileNodesFromContract(contract DataContr
 	return files, nil
 }
 
-func (dqp *DataVerificationProtocol) onNodeRangeDataRequest(s network.Stream) {
-	buf, err := ioutil.ReadAll(s)
-	defer s.Close()
+func (dqp *DataVerificationProtocol) RequestNodeDataRange(contractHash []byte, nodeHash []byte, from, to uint64) bool {
+
+	_, ok := dqp.GetContract(hexutil.Encode(contractHash))
+	if !ok {
+		return false
+	}
+
+	nrdr := NodeDataRangeRequest{
+		ContractHash: contractHash,
+		Node:         nodeHash,
+		From:         from,
+		To:           to,
+	}
+
+	nrdrBits, err := proto.Marshal(&nrdr)
 	if err != nil {
-		s.Reset()
+		return false
+	}
+
+	msg := make([]byte, 8+len(nrdrBits))
+	binary.LittleEndian.PutUint64(msg, uint64(len(nrdrBits)))
+	copy(msg[8:], nrdrBits)
+	ctx, ok := dqp.GetContractTransaction(hexutil.Encode(contractHash))
+
+	peerIDs := []peer.ID{}
+	peerIDs = append(peerIDs, ctx.hostID)
+	accessiblePeers := dqp.Node.FindPeers(peerIDs)
+	if len(accessiblePeers) != 1 {
+		log.Warn("couldn't find host node")
+		return false
+	}
+
+	if err := dqp.Node.Host.Connect(context.Background(), accessiblePeers[0]); err != nil {
+		log.Warn("unable to connect to data hoster node ", err)
+		return false
+	}
+
+	s, err := dqp.Node.Host.NewStream(context.Background(), ctx.hostID, NodeDataRangeRequestID)
+	if err != nil {
+		log.Error(err)
+		return false
+	}
+	_, err = s.Write(msg)
+	if err != nil {
+		return false
+	}
+	// c := bufio.NewReader(s)
+	output, err := os.OpenFile("/root/"+hexutil.Encode(nodeHash), os.O_RDWR|os.O_CREATE, 0777)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	buf := make([]byte, 1024)
+	for {
+		n, err := s.Read(buf)
+		if n > 0 {
+			output.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Read %d bytes: %v", n, err)
+			break
+		}
+	}
+	return true
+}
+
+func (dqp *DataVerificationProtocol) onNodeDataRangeRequest(s network.Stream) {
+	c := bufio.NewReader(s)
+	defer s.Close()
+
+	msgLengthBuffer := make([]byte, 8)
+	_, err := c.Read(msgLengthBuffer)
+	if err != nil {
 		log.Error(err)
 		return
 	}
 
-	nrdr := NodeRangeDataRequest{}
+	lengthPrefix := int64(binary.LittleEndian.Uint64(msgLengthBuffer))
+	buf := make([]byte, lengthPrefix)
+	// read the full message, or return an error
+	_, err = io.ReadFull(c, buf)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	nrdr := NodeDataRangeRequest{}
 
 	err = proto.Unmarshal(buf, &nrdr)
 	if err != nil {
@@ -271,10 +375,13 @@ func (dqp *DataVerificationProtocol) onNodeRangeDataRequest(s network.Stream) {
 		return
 	}
 
+	fmt.Println("contract nodes: ", contract.HostResponse.Nodes)
+
 	fileNodes, _ := dqp.GetFileNodesFromContract(contract)
+	log.Println("total filenodes for this contract: ", len(fileNodes))
 
 	for _, fn := range fileNodes {
-		if fn.Hash == hexutil.Encode(nrdr.ContractHash) {
+		if fn.Hash == hexutil.Encode(nrdr.Node) {
 			fileItem, err := dqp.Node.BinLayerEngine.GetBinaryItem(fn.Hash)
 			if err != nil {
 				log.Error("couldn't find binary in binlayer")
@@ -287,7 +394,7 @@ func (dqp *DataVerificationProtocol) onNodeRangeDataRequest(s network.Stream) {
 				return
 			}
 
-			readFromFile := path.Join(dqp.Node.BinLayerEngine.Path, bitem.FilePath, fn.Hash)
+			readFromFile := path.Join(bitem.FilePath, fn.Hash)
 			infile, err := os.Open(readFromFile)
 			if err != nil {
 				log.Error("couldn't open binlayer file" + err.Error())
@@ -326,7 +433,7 @@ func NewDataVerificationProtocol(n *Node) *DataVerificationProtocol {
 		contracts: make(map[string]ContractTransaction),
 	}
 	n.Host.SetStreamHandler(DataVerifierRequestID, p.onDataVerifierRequest)
-	n.Host.SetStreamHandler(NodeRangeDataRequestID, p.onNodeRangeDataRequest)
+	n.Host.SetStreamHandler(NodeDataRangeRequestID, p.onNodeDataRangeRequest)
 
 	return p
 }
@@ -377,14 +484,14 @@ func (dqp *DataVerificationProtocol) HandleIncomingBlock(block Block) {
 			dc := *contract
 			// handle this data contract
 			if bytes.Equal(dc.VerifierPubKey, nodePubKeyBytes) {
-				if dqp.coordinate(dc, tx) {
-					dqp.AddContract(dc, *tx)
+				h, d, ok := dqp.coordinate(dc, tx)
+				if ok {
+					dqp.AddContract(dc, *tx, PeerContextType_Verifier, h, d)
 				} else {
 					log.Warn("coordination failed")
 				}
 			}
 		}
-
 	}
 }
 
@@ -401,8 +508,15 @@ func (dqp *DataVerificationProtocol) verifyContract(contract DataContract, tx *T
 			}
 		}
 	}
+
 	if !isValidVerifier {
 		log.Error("invalid verifier")
+		return hostID, downloaderID, false
+	}
+
+	// make sure tx i sent to verifiers address
+	if crypto.RawPublicToAddress(contract.VerifierPubKey) != tx.To {
+		log.Error("transaction wasn't sent to verifier's address")
 		return hostID, downloaderID, false
 	}
 
@@ -466,12 +580,12 @@ func (dqp *DataVerificationProtocol) verifyContract(contract DataContract, tx *T
 }
 
 // coordinate validates the tx and contract and sends the tx to the host and downloader
-func (dqp *DataVerificationProtocol) coordinate(contract DataContract, tx *Transaction) bool {
+func (dqp *DataVerificationProtocol) coordinate(contract DataContract, tx *Transaction) (peer.ID, peer.ID, bool) {
 	log.Println("executing data contract")
 	hostID, downloaderID, ok := dqp.verifyContract(contract, tx)
 	if !ok {
 		log.Warn("contract invalid")
-		return false
+		return hostID, downloaderID, false
 	}
 
 	peerIDs := []peer.ID{}
@@ -480,13 +594,13 @@ func (dqp *DataVerificationProtocol) coordinate(contract DataContract, tx *Trans
 	accessiblePeers := dqp.Node.FindPeers(peerIDs)
 	if len(accessiblePeers) != 2 {
 		log.Warn("couldn't find both nodes")
-		return false
+		return hostID, downloaderID, false
 	}
 
 	for _, addr := range accessiblePeers {
 		if err := dqp.Node.Host.Connect(context.Background(), addr); err != nil {
 			log.Warn("unable to connect to remote host/downloader nodes ", err)
-			return false
+			return hostID, downloaderID, false
 		}
 	}
 
@@ -494,29 +608,27 @@ func (dqp *DataVerificationProtocol) coordinate(contract DataContract, tx *Trans
 	hostStream, err := dqp.Node.Host.NewStream(context.Background(), hostID, DataVerifierRequestID)
 	if err != nil {
 		log.Warn("unable to connect to data hoster: ", err)
-		return false
+		return hostID, downloaderID, false
 	}
 	downloaderStream, err := dqp.Node.Host.NewStream(context.Background(), downloaderID, DataVerifierRequestID)
 	if err != nil {
 		log.Warn("unable to connect to downloader: ", err)
-		return false
+		return hostID, downloaderID, false
 	}
 
-	contBits, _ := proto.Marshal(&contract)
-	chash := crypto.Sha256HashHexBytes(contBits)
 	tvrp := DataVerifierRequestPayload{
 		Transaction:  tx,
-		ContractHash: chash,
+		ContractHash: contract.GetHash(),
 	}
 
 	bts, err := proto.Marshal(&tvrp)
 	if err != nil {
 		log.Error(err)
-		return false
+		return hostID, downloaderID, false
 	}
 	hostStream.Write(bts)
 	hostStream.Close()
 	downloaderStream.Write(bts)
 	downloaderStream.Close()
-	return true
+	return hostID, downloaderID, true
 }
