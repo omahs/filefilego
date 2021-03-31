@@ -199,6 +199,7 @@ func (n *Engine) GetBinaryItem(nodeHash string) ([]byte, error) {
 	err := n.DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dataBucket))
 		node := b.Get([]byte(nodeHash))
+		data = make([]byte, len(node))
 		if node == nil {
 			return errors.New("Node hash doesn't exist")
 		}

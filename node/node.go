@@ -372,7 +372,6 @@ func (n *Node) HandleGossip(msg *pubsub.Message) error {
 
 				dqres := DataQueryResponse{
 					Nodes:             availableNodesBytes,
-					UnavailableNodes:  unavailableNodes,
 					FromPeerAddr:      n.GetReachableAddr(),
 					TotalFeesRequired: finalAmountHex,
 					Hash:              dqr.Hash,
